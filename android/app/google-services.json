@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "655512041964",
+    "project_id": "slv-super-market",
+    "storage_bucket": "slv-super-market.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:655512041964:android:705fd6e385948dcf2ba8c9",
+        "android_client_info": {
+          "package_name": "com.example.supermarket_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCXJ6YMdfTvbRnk7ccD4_Y8t0AlBGQwyeo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

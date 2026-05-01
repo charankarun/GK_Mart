@@ -1,0 +1,44 @@
+
+name: supermarket_app
+description: A basic supermarket Flutter app
+publish_to: 'none'
+version: 1.0.0
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  cloud_firestore: ^6.3.0
+  firebase_auth: ^6.4.0
+  firebase_core: ^4.7.0
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+  flutter_native_splash: ^2.4.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/SLV_super_market.png
+
+# 🔥 SPLASH SCREEN CONFIG
+flutter_native_splash:
+  color: "#ffffff"
+
+  android_12:
+    image: assets/SLV_super_market.png
+    icon_background_color: "#ffffff"
+    image_dark: assets/SLV_super_market.png
+
+  android: true
+  ios: true
+
+# 🔥 APP ICON CONFIG
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/SLV_super_market.png"
