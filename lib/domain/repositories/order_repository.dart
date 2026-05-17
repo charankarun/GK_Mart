@@ -1,12 +1,27 @@
 import '../entities/cart_item.dart';
 import '../entities/customer_order.dart';
+import '../entities/order_analytics.dart';
+import '../entities/order_page.dart';
 
 abstract class OrderRepository {
-  Stream<List<Order>> watchUserOrders(String userId);
+  Stream<List<Order>> watchUserOrders(String userId, {int limit = 20});
 
-  Stream<List<Order>> watchAllOrders({int limit = 100});
+  Stream<List<Order>> watchAllOrders({int limit = 50});
 
   Stream<Order?> watchOrder(String orderId);
+
+  Future<OrderPage> fetchUserOrdersPage({
+    required String userId,
+    required int limit,
+    OrderPageCursor? cursor,
+  });
+
+  Future<OrderPage> fetchAllOrdersPage({
+    required int limit,
+    OrderPageCursor? cursor,
+  });
+
+  Future<OrderAnalytics> fetchOrderAnalytics();
 
   Future<String> createOrder(CreateOrderRequest request);
 

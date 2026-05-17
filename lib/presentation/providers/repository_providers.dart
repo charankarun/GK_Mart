@@ -52,7 +52,10 @@ final productRepositoryProvider = Provider<ProductRepository>((ref) {
 });
 
 final categoryRepositoryProvider = Provider<CategoryRepository>((ref) {
-  return CategoryRepositoryImpl(ref.watch(firestoreProvider));
+  return CategoryRepositoryImpl(
+    firestore: ref.watch(firestoreProvider),
+    storage: ref.watch(firebaseStorageProvider),
+  );
 });
 
 final cartRepositoryProvider = Provider<CartRepository>((ref) {

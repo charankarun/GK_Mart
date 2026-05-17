@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/app_error_handler.dart';
 import '../providers/auth_providers.dart';
 import '../providers/repository_providers.dart';
 
@@ -33,12 +34,16 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
   }
 
   void _showMessage(String message) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
   }
 
   Future<void> _changePassword() async {
+    if (isLoading) return;
+
     final session = ref.read(currentSessionProvider);
     final currentPassword = currentPasswordController.text.trim();
     final newPassword = newPasswordController.text.trim();
@@ -100,6 +105,12 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
       }
 
       _showMessage(message);
+    } catch (error) {
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: 'Unable to update password',
+      );
     } finally {
       if (mounted) setState(() => isLoading = false);
     }

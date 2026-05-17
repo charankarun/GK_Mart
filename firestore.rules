@@ -1,0 +1,445 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function adminConfigExists() {
+      return exists(/databases/$(database)/documents/admin_config/admins);
+    }
+
+    function adminData() {
+      return get(/databases/$(database)/documents/admin_config/admins).data;
+    }
+
+    function adminEmailMatches() {
+      return request.auth.token.email is string
+        && (
+          request.auth.token.email in adminData().get('emails', [])
+          || request.auth.token.email in adminData().get('adminEmails', [])
+          || request.auth.token.email in adminData().get('admin_emails', [])
+        );
+    }
+
+    function adminPhoneMatches() {
+      return request.auth.token.phone_number is string
+        && (
+          request.auth.token.phone_number in adminData().get('phones', [])
+          || request.auth.token.phone_number in adminData().get('adminPhones', [])
+          || request.auth.token.phone_number in adminData().get('admin_phones', [])
+        );
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && adminConfigExists()
+        && (adminEmailMatches() || adminPhoneMatches());
+    }
+
+    function validOrderStatus(status) {
+      return status in [
+        'Placed',
+        'Packed',
+        'Out for Delivery',
+        'Delivered',
+      ];
+    }
+
+    function validOrderId(orderId) {
+      return orderId is string
+        && orderId.matches('^SLV-[0-9]{8}-[A-Z0-9]{4}$');
+    }
+
+    function validOrderCreate(orderId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          'orderId',
+          'userId',
+          'userName',
+          'customerName',
+          'phone',
+          'address',
+          'pincode',
+          'items',
+          'totalAmount',
+          'total',
+          'totalSavings',
+          'status',
+          'paymentMethod',
+          'createdAt',
+          'timestamp',
+        ])
+        && data.keys().hasAll([
+          'orderId',
+          'userId',
+          'items',
+          'totalAmount',
+          'total',
+          'status',
+          'createdAt',
+          'timestamp',
+        ])
+        && data.orderId == orderId
+        && validOrderId(orderId)
+        && data.userId == request.auth.uid
+        && data.status == 'Placed'
+        && data.items is list
+        && data.items.size() > 0
+        && data.items.size() <= 100
+        && data.totalAmount is number
+        && data.totalAmount >= 0
+        && data.total is number
+        && data.total == data.totalAmount
+        && data.get('totalSavings', 0) is number
+        && data.get('totalSavings', 0) >= 0
+        && data.get('userName', '') is string
+        && data.get('customerName', '') is string
+        && data.get('phone', '') is string
+        && data.get('address', '') is string
+        && data.get('pincode', '') is string
+        && data.get('paymentMethod', 'COD') is string
+        && data.createdAt == request.time
+        && data.timestamp == request.time;
+    }
+
+    function validProductCore() {
+      let data = request.resource.data;
+      return data.get('name', '') is string
+        && data.get('name', '').size() > 0
+        && data.get('searchName', data.get('name', '')) is string
+        && data.get('searchName', data.get('name', '')).size() > 0
+        && data.get('categoryId', '') is string
+        && data.get('categoryId', '').size() > 0
+        && data.get('price', -1) is number
+        && data.get('price', -1) > 0
+        && data.get('discountPrice', 0) is number
+        && data.get('discountPrice', 0) >= 0
+        && data.get('imageUrl', '') is string
+        && data.get('isAvailable', true) is bool
+        && data.get('unit', '') is string
+        && data.get('stockQuantity', 0) is number
+        && data.get('stockQuantity', 0) >= 0
+        && data.get('lowStockThreshold', 5) is number
+        && data.get('lowStockThreshold', 5) >= 0;
+    }
+
+    function validProductCreate() {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          'name',
+          'searchName',
+          'categoryId',
+          'price',
+          'discountPrice',
+          'imageUrl',
+          'isAvailable',
+          'unit',
+          'stockQuantity',
+          'lowStockThreshold',
+          'createdAt',
+          'updatedAt',
+        ])
+        && data.keys().hasAll([
+          'name',
+          'searchName',
+          'categoryId',
+          'price',
+          'discountPrice',
+          'imageUrl',
+          'isAvailable',
+          'createdAt',
+          'updatedAt',
+        ])
+        && validProductCore()
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function validProductUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name',
+          'searchName',
+          'categoryId',
+          'price',
+          'discountPrice',
+          'imageUrl',
+          'isAvailable',
+          'unit',
+          'stockQuantity',
+          'lowStockThreshold',
+          'updatedAt',
+        ])
+        && validProductCore()
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function validCategoryCore() {
+      let data = request.resource.data;
+      return data.get('name', '') is string
+        && data.get('name', '').size() > 0
+        && data.get('imageUrl', '') is string;
+    }
+
+    function validCategoryCreate() {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          'name',
+          'imageUrl',
+          'createdAt',
+          'updatedAt',
+        ])
+        && data.keys().hasAll([
+          'name',
+          'imageUrl',
+          'createdAt',
+          'updatedAt',
+        ])
+        && validCategoryCore()
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function validCategoryUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name',
+          'imageUrl',
+          'updatedAt',
+        ])
+        && validCategoryCore()
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function userWriteKeys() {
+      return [
+        'name',
+        'email',
+        'phone',
+        'address',
+        'addresses',
+        'photoUrl',
+        'createdAt',
+        'updatedAt',
+      ];
+    }
+
+    function validUserFields(data) {
+      return data.get('name', '') is string
+        && data.get('email', '') is string
+        && data.get('phone', '') is string
+        && data.get('address', '') is string
+        && data.get('addresses', []) is list
+        && data.get('addresses', []).size() <= 20
+        && data.get('photoUrl', '') is string
+        && data.updatedAt == request.time;
+    }
+
+    function validUserCreate() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(userWriteKeys())
+        && validUserFields(data);
+    }
+
+    function validUserUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(userWriteKeys())
+        && validUserFields(request.resource.data);
+    }
+
+    function validFcmTokenId(tokenId) {
+      return tokenId is string
+        && tokenId.size() > 0
+        && tokenId.size() <= 512;
+    }
+
+    function validFcmTokenFields(data) {
+      return data.get('token', '') is string
+        && data.get('token', '').size() >= 20
+        && data.get('token', '').size() <= 4096
+        && data.get('platform', '') in [
+          'android',
+          'ios',
+          'macos',
+          'linux',
+          'windows',
+          'web',
+          'fuchsia',
+        ]
+        && data.get('enabled', false) is bool
+        && data.get('createdAt', request.time) is timestamp
+        && data.get('updatedAt', request.time) is timestamp
+        && data.get('lastSeenAt', request.time) is timestamp;
+    }
+
+    function validFcmTokenCreate(tokenId) {
+      let data = request.resource.data;
+      return validFcmTokenId(tokenId)
+        && data.keys().hasOnly([
+          'token',
+          'platform',
+          'enabled',
+          'createdAt',
+          'updatedAt',
+          'lastSeenAt',
+        ])
+        && data.keys().hasAll([
+          'token',
+          'platform',
+          'enabled',
+          'createdAt',
+          'updatedAt',
+          'lastSeenAt',
+        ])
+        && validFcmTokenFields(data)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time
+        && data.lastSeenAt == request.time;
+    }
+
+    function validFcmTokenUpdate(tokenId) {
+      return validFcmTokenId(tokenId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'token',
+          'platform',
+          'enabled',
+          'updatedAt',
+          'lastSeenAt',
+        ])
+        && validFcmTokenFields(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.lastSeenAt == request.time;
+    }
+
+    function validAddressDocument() {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          'address',
+          'landmark',
+          'pincode',
+          'isDefault',
+          'createdAt',
+          'updatedAt',
+        ])
+        && data.get('address', '') is string
+        && data.get('address', '').size() >= 10
+        && data.get('landmark', '') is string
+        && data.get('landmark', '').size() >= 3
+        && data.get('pincode', '') is string
+        && data.get('pincode', '').size() == 6
+        && data.get('isDefault', false) is bool
+        && data.updatedAt == request.time;
+    }
+
+    function validWishlistWrite() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['productIds'])
+        && data.get('productIds', []) is list
+        && data.get('productIds', []).size() <= 500;
+    }
+
+    function validCartItemWrite() {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          'name',
+          'price',
+          'discountPrice',
+          'unit',
+          'image',
+          'quantity',
+        ])
+        && data.keys().hasAll([
+          'name',
+          'price',
+          'discountPrice',
+          'unit',
+          'image',
+          'quantity',
+        ])
+        && data.get('name', '') is string
+        && data.get('price', 0) is number
+        && data.get('price', 0) >= 0
+        && data.get('discountPrice', 0) is number
+        && data.get('discountPrice', 0) >= 0
+        && data.get('unit', '') is string
+        && data.get('image', '') is string
+        && data.get('quantity', 0) is number
+        && data.get('quantity', 0) >= 1
+        && data.get('quantity', 0) <= 99;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && validUserCreate();
+      allow update: if isOwner(userId) && validUserUpdate();
+      allow delete: if isOwner(userId);
+
+      match /addresses/{addressId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && validAddressDocument();
+        allow delete: if isOwner(userId);
+      }
+
+      match /fcmTokens/{tokenId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && validFcmTokenCreate(tokenId);
+        allow update: if isOwner(userId) && validFcmTokenUpdate(tokenId);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    match /orders/{orderId} {
+      allow create: if signedIn() && validOrderCreate(orderId);
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && validOrderStatus(request.resource.data.status);
+      allow delete: if false;
+    }
+
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isAdmin() && validProductCreate();
+      allow update: if isAdmin() && validProductUpdate();
+      allow delete: if isAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create: if isAdmin() && validCategoryCreate();
+      allow update: if isAdmin() && validCategoryUpdate();
+      allow delete: if isAdmin();
+    }
+
+    match /wishlist/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validWishlistWrite();
+      allow delete: if isOwner(userId);
+    }
+
+    match /carts/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false;
+
+      match /items/{productId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && validCartItemWrite();
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    match /admin_config/{documentId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

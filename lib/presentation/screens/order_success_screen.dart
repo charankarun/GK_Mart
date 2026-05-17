@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../main.dart';
-import 'orders_screen.dart';
+import '../navigation/customer_navigation_scope.dart';
 
 class OrderSuccessScreen extends StatelessWidget {
   const OrderSuccessScreen({super.key});
@@ -41,22 +40,14 @@ class OrderSuccessScreen extends StatelessWidget {
                   minimumSize: const Size(double.infinity, 50),
                 ),
                 onPressed: () {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (_) => const OrdersScreen()),
-                    (route) => false,
-                  );
+                  CustomerNavigationScope.openOrders(context);
                 },
                 child: const Text('View Orders'),
               ),
               const SizedBox(height: 10),
               TextButton(
                 onPressed: () {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (_) => const MainScreen()),
-                    (route) => false,
-                  );
+                  CustomerNavigationScope.openHome(context);
                 },
                 child: const Text('Continue Shopping'),
               ),

@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../domain/entities/app_user.dart';
 import '../../domain/entities/auth_session.dart';
 import '../../domain/repositories/auth_repository.dart';
@@ -28,10 +29,12 @@ class FirebaseAuthRepository implements AuthRepository {
     required String email,
     required String password,
   }) {
-    return _auth.signInWithEmailAndPassword(
-      email: email.trim(),
-      password: password.trim(),
-    );
+    return _auth
+        .signInWithEmailAndPassword(
+          email: email.trim(),
+          password: password.trim(),
+        )
+        .timeout(AppDurations.networkTimeout);
   }
 
   @override
@@ -41,10 +44,12 @@ class FirebaseAuthRepository implements AuthRepository {
     required String email,
     required String password,
   }) async {
-    final credential = await _auth.createUserWithEmailAndPassword(
-      email: email.trim(),
-      password: password.trim(),
-    );
+    final credential = await _auth
+        .createUserWithEmailAndPassword(
+          email: email.trim(),
+          password: password.trim(),
+        )
+        .timeout(AppDurations.networkTimeout);
     final user = credential.user;
 
     if (user == null) {
@@ -83,13 +88,17 @@ class FirebaseAuthRepository implements AuthRepository {
       password: currentPassword.trim(),
     );
 
-    await user.reauthenticateWithCredential(credential);
-    await user.updatePassword(newPassword.trim());
+    await user
+        .reauthenticateWithCredential(credential)
+        .timeout(AppDurations.networkTimeout);
+    await user.updatePassword(newPassword.trim()).timeout(
+          AppDurations.networkTimeout,
+        );
   }
 
   @override
   Future<void> signOut() {
-    return _auth.signOut();
+    return _auth.signOut().timeout(AppDurations.networkTimeout);
   }
 
   AuthSession? _toSession(User? user) {

@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/constants/app_constants.dart';
+import '../../core/errors/repository_exception.dart';
 import '../../domain/entities/auth_session.dart';
 import '../../domain/repositories/admin_repository.dart';
 import '../mappers/firestore_value_parser.dart';
@@ -10,24 +12,31 @@ class FirestoreAdminRepository implements AdminRepository {
   final FirebaseFirestore _firestore;
 
   DocumentReference<Map<String, dynamic>> get _adminConfigRef {
-    return _firestore.collection('admin_config').doc('admins');
+    return _firestore
+        .collection(FirestoreCollections.adminConfig)
+        .doc(FirestoreDocuments.admins);
   }
 
   @override
   Stream<bool> watchIsAdmin(AuthSession session) async* {
-    try {
-      await for (final doc in _adminConfigRef.snapshots()) {
-        final data = doc.data();
-        if (data == null) {
-          yield false;
-          continue;
-        }
+    yield* RepositoryGuard.watch(
+      message: 'Unable to verify admin access.',
+      create: () async* {
+        try {
+          await for (final doc in _adminConfigRef.snapshots()) {
+            final data = doc.data();
+            if (data == null) {
+              yield false;
+              continue;
+            }
 
-        yield _matchesAdminConfig(session, data);
-      }
-    } catch (_) {
-      yield false;
-    }
+            yield _matchesAdminConfig(session, data);
+          }
+        } catch (_) {
+          yield false;
+        }
+      },
+    );
   }
 
   bool _matchesAdminConfig(

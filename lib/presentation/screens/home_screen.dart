@@ -1,15 +1,24 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/app_error_handler.dart';
+import '../../core/theme/app_theme.dart';
 import '../../domain/entities/category.dart';
 import '../../domain/entities/product.dart';
 import '../providers/auth_providers.dart';
 import '../providers/catalog_providers.dart';
 import '../providers/commerce_providers.dart';
-import '../providers/search_provider.dart';
 import '../providers/wishlist_provider.dart';
+import '../widgets/app_cached_network_image.dart';
+import '../widgets/customer_support_sheet.dart';
+import '../widgets/product_card.dart';
+import 'address_screen.dart';
 import 'cart_screen.dart';
+import 'category_products_screen.dart';
+import 'orders_screen.dart';
 import 'product_detail_screen.dart';
+import 'search_results_screen.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -19,28 +28,61 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  final searchFocusNode = FocusNode();
-  final searchController = TextEditingController();
-  String? selectedCategoryId;
-  _ProductViewMode viewMode = _ProductViewMode.grid;
+  final _scrollController = ScrollController();
+  final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode();
+  bool _didPrecacheBanner = false;
 
   @override
   void initState() {
     super.initState();
-    searchFocusNode.addListener(_handleSearchFocusChanged);
+    _scrollController.addListener(_handleScroll);
+    _searchController.addListener(_handleSearchTextChanged);
+    _searchFocusNode.addListener(_handleSearchFocusChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_didPrecacheBanner) return;
+
+    _didPrecacheBanner = true;
+    precacheImage(
+      const CachedNetworkImageProvider(
+        HomeText.bannerImageUrl,
+        maxWidth: HomeConfig.bannerDiskCacheWidth,
+      ),
+      context,
+      onError: (_, __) {},
+    );
   }
 
   @override
   void dispose() {
-    searchFocusNode.removeListener(_handleSearchFocusChanged);
-    searchController.dispose();
-    searchFocusNode.dispose();
+    _scrollController.removeListener(_handleScroll);
+    _searchController.removeListener(_handleSearchTextChanged);
+    _searchFocusNode.removeListener(_handleSearchFocusChanged);
+    _scrollController.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
   void _handleSearchFocusChanged() {
-    if (!mounted) return;
-    setState(() {});
+    if (mounted) setState(() {});
+  }
+
+  void _handleSearchTextChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients) return;
+
+    final position = _scrollController.position;
+    if (position.extentAfter > HomeConfig.loadMoreExtent) return;
+
+    _loadMoreProducts(showErrors: false);
   }
 
   @override
@@ -48,7 +90,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     final session = ref.watch(currentSessionProvider);
 
     if (session == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     final profile = ref.watch(currentUserProfileProvider).maybeWhen(
@@ -56,7 +100,12 @@ class _HomePageState extends ConsumerState<HomePage> {
           orElse: () => null,
         );
     final categoriesAsync = ref.watch(categoriesStreamProvider);
-    final productsAsync = ref.watch(productsStreamProvider);
+    final productListAsync = ref.watch(catalogProductListProvider);
+    final productsAsync = productListAsync.whenData((state) => state.products);
+    final productListState = productListAsync.maybeWhen(
+      data: (state) => state,
+      orElse: () => null,
+    );
     final cartItems = ref.watch(cartItemsProvider);
     final cartCount = ref.watch(cartItemCountProvider);
     final cartQtyById = {
@@ -65,83 +114,102 @@ class _HomePageState extends ConsumerState<HomePage> {
     final wishlistedProductIds = ref.watch(
       wishlistProductIdSetProvider(session.uid),
     );
-    final categories = categoriesAsync.maybeWhen(
-      data: (items) => items,
-      orElse: () => const <Category>[],
+    final wishlistPendingProductIds = ref.watch(
+      wishlistPendingProductIdsProvider(session.uid),
     );
-    final selectedCategory = _selectedCategory(categories);
 
-    return SafeArea(
-      child: Container(
-        color: const Color(0xFFF7F8FA),
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      drawer: const _HomeDrawer(),
+      body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _HomeHeader(
-              displayName: profile?.displayName ?? HomeText.defaultGreetingName,
-              address: profile?.address ?? '',
+            _HomeTopBar(
               cartCount: cartCount,
-              onCartTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const CartScreen()),
-                );
-              },
+              onCartTap: _openCart,
+              onNotificationTap: _showNoNotifications,
             ),
-            _SearchSection(
-              controller: searchController,
-              focusNode: searchFocusNode,
-              isFocused: searchFocusNode.hasFocus,
-              onProductSelected: _openProductDetail,
-            ),
-            const SizedBox(height: 12),
-            _CategoryStrip(
-              categoriesAsync: categoriesAsync,
-              selectedCategoryId: selectedCategoryId,
-              onCategorySelected: (categoryId) {
-                setState(() => selectedCategoryId = categoryId);
-              },
-            ),
-            const SizedBox(height: 10),
-            _ProductsHeader(
-              title: selectedCategory?.name ?? HomeText.allProducts,
-              viewMode: viewMode,
-              onViewModeChanged: (mode) {
-                setState(() => viewMode = mode);
-              },
-            ),
-            const SizedBox(height: 8),
             Expanded(
-              child: _ProductsBody(
-                productsAsync: productsAsync,
-                selectedCategoryId: selectedCategoryId,
-                selectedCategory: selectedCategory,
-                cartQtyById: cartQtyById,
-                wishlistedProductIds: wishlistedProductIds,
-                viewMode: viewMode,
-                onOpen: _openProductDetail,
-                onAdd: (product) {
-                  ref.read(cartControllerProvider.notifier).addProduct(
-                        product,
-                      );
-                },
-                onIncrement: (product) {
-                  ref.read(cartControllerProvider.notifier).increment(
-                        product.id,
-                      );
-                },
-                onDecrement: (product) {
-                  ref.read(cartControllerProvider.notifier).decrement(
-                        product.id,
-                      );
-                },
-                onToggleWishlist: (product) {
-                  _toggleWishlist(
-                    userId: session.uid,
-                    product: product,
-                    isWishlisted: wishlistedProductIds.contains(product.id),
-                  );
-                },
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _DeliveryLocation(
+                      address: profile?.address ?? '',
+                      onTap: _openAddress,
+                    ),
+                    _SearchSection(
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      onSearchSubmitted: _openSearchResults,
+                    ),
+                    _PromoBanner(onShopNow: _scrollToProducts),
+                    _CategorySection(
+                      categoriesAsync: categoriesAsync,
+                      onCategorySelected: _openCategoryProducts,
+                      onRetry: () => ref.invalidate(categoriesStreamProvider),
+                    ),
+                    _ProductsAsyncSection(
+                      title: HomeText.topOffersTitle,
+                      emptyMessage: HomeText.noOffers,
+                      productsAsync: productsAsync,
+                      cartQtyById: cartQtyById,
+                      wishlistedProductIds: wishlistedProductIds,
+                      wishlistPendingProductIds: wishlistPendingProductIds,
+                      onlyDiscounted: true,
+                      maxProducts: HomeConfig.topOfferLimit,
+                      onRetry: () {
+                        ref
+                            .read(catalogProductListProvider.notifier)
+                            .loadInitial();
+                      },
+                      onOpen: _openProductDetail,
+                      onAdd: _addProduct,
+                      onIncrement: _incrementProduct,
+                      onDecrement: _decrementProduct,
+                      onToggleWishlist: (product) {
+                        _toggleWishlist(
+                          userId: session.uid,
+                          product: product,
+                          isWishlisted:
+                              wishlistedProductIds.contains(product.id),
+                        );
+                      },
+                    ),
+                    _ProductsAsyncSection(
+                      title: HomeText.productsTitle,
+                      emptyMessage: HomeText.noProducts,
+                      productsAsync: productsAsync,
+                      cartQtyById: cartQtyById,
+                      wishlistedProductIds: wishlistedProductIds,
+                      wishlistPendingProductIds: wishlistPendingProductIds,
+                      onRetry: () {
+                        ref
+                            .read(catalogProductListProvider.notifier)
+                            .loadInitial();
+                      },
+                      isLoadingMore: productListState?.isLoadingMore ?? false,
+                      hasMore: productListState?.hasMore ?? false,
+                      onLoadMore: () => _loadMoreProducts(showErrors: true),
+                      onOpen: _openProductDetail,
+                      onAdd: _addProduct,
+                      onIncrement: _incrementProduct,
+                      onDecrement: _decrementProduct,
+                      onToggleWishlist: (product) {
+                        _toggleWishlist(
+                          userId: session.uid,
+                          product: product,
+                          isWishlisted:
+                              wishlistedProductIds.contains(product.id),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
               ),
             ),
           ],
@@ -150,7 +218,22 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  void _openCart() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CartScreen()),
+    );
+  }
+
+  void _openAddress() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddressScreen()),
+    );
+  }
+
   void _openProductDetail(Product product) {
+    _searchFocusNode.unfocus();
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -159,15 +242,42 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Category? _selectedCategory(List<Category> categories) {
-    final categoryId = selectedCategoryId;
-    if (categoryId == null) return null;
-
-    for (final category in categories) {
-      if (category.id == categoryId) return category;
+  void _openSearchResults(String query) {
+    final normalizedQuery = query.trim();
+    if (normalizedQuery.isEmpty) {
+      _searchFocusNode.requestFocus();
+      return;
     }
 
-    return null;
+    _searchFocusNode.unfocus();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SearchResultsScreen(query: normalizedQuery),
+      ),
+    );
+  }
+
+  void _openCategoryProducts(Category category) {
+    _searchFocusNode.unfocus();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CategoryProductsScreen(category: category),
+      ),
+    );
+  }
+
+  void _addProduct(Product product) {
+    ref.read(cartControllerProvider.notifier).addProduct(product);
+  }
+
+  void _incrementProduct(Product product) {
+    ref.read(cartControllerProvider.notifier).increment(product.id);
+  }
+
+  void _decrementProduct(Product product) {
+    ref.read(cartControllerProvider.notifier).decrement(product.id);
   }
 
   Future<void> _toggleWishlist({
@@ -181,113 +291,87 @@ class _HomePageState extends ConsumerState<HomePage> {
         productId: product.id,
         wishlisted: !isWishlisted,
       );
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(HomeText.wishlistUpdateError)),
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: HomeText.wishlistUpdateError,
       );
     }
   }
+
+  Future<void> _loadMoreProducts({required bool showErrors}) async {
+    try {
+      await ref.read(catalogProductListProvider.notifier).loadNext();
+    } catch (error) {
+      if (!mounted || !showErrors) return;
+
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: HomeText.productsError,
+      );
+    }
+  }
+
+  void _scrollToProducts() {
+    _searchFocusNode.unfocus();
+    _scrollController.animateTo(
+      HomeConfig.productsScrollOffset,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _showNoNotifications() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(HomeText.noNotifications)),
+    );
+  }
 }
 
-class _HomeHeader extends StatelessWidget {
-  const _HomeHeader({
-    required this.displayName,
-    required this.address,
+class _HomeTopBar extends StatelessWidget {
+  const _HomeTopBar({
     required this.cartCount,
     required this.onCartTap,
+    required this.onNotificationTap,
   });
 
-  final String displayName;
-  final String address;
   final int cartCount;
   final VoidCallback onCartTap;
+  final VoidCallback onNotificationTap;
 
   @override
   Widget build(BuildContext context) {
-    final visibleAddress = address.trim();
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+    return Container(
+      color: AppColors.card,
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
       child: Row(
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${HomeText.greetingPrefix} $displayName',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (visibleAddress.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.location_on,
-                        size: 15,
-                        color: Color(0xFF16A34A),
-                      ),
-                      const SizedBox(width: 3),
-                      Expanded(
-                        child: Text(
-                          visibleAddress,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.grey.shade700,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
+          Builder(
+            builder: (context) {
+              return _IconButtonSurface(
+                tooltip: HomeText.menu,
+                icon: Icons.menu_rounded,
+                onTap: () => Scaffold.of(context).openDrawer(),
+              );
+            },
+          ),
+          const Expanded(child: Center(child: _BrandLockup())),
+          _BadgeIconButton(
+            tooltip: HomeText.notifications,
+            icon: Icons.notifications_none_rounded,
+            count: 0,
+            onTap: onNotificationTap,
           ),
           const SizedBox(width: 8),
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IconButton.filled(
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: const Color(0xFF111827),
-                ),
-                icon: const Icon(Icons.shopping_cart),
-                onPressed: onCartTap,
-              ),
-              if (cartCount > 0)
-                Positioned(
-                  right: -2,
-                  top: -2,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade600,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      cartCount.toString(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+          _BadgeIconButton(
+            tooltip: HomeText.cart,
+            icon: Icons.shopping_cart_outlined,
+            count: cartCount,
+            onTap: onCartTap,
           ),
         ],
       ),
@@ -295,242 +379,402 @@ class _HomeHeader extends StatelessWidget {
   }
 }
 
-class _SearchSection extends ConsumerWidget {
-  const _SearchSection({
-    required this.controller,
-    required this.focusNode,
-    required this.isFocused,
-    required this.onProductSelected,
-  });
+class _BrandLockup extends StatelessWidget {
+  const _BrandLockup({this.compact = false});
 
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final bool isFocused;
-  final ValueChanged<Product> onProductSelected;
+  final bool compact;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final hasQuery = ref.watch(
-      productSearchQueryProvider.select((query) => query.trim().isNotEmpty),
-    );
-    final suggestionsAsync = isFocused && hasQuery
-        ? ref.watch(productSearchSuggestionsProvider)
-        : const AsyncData(<Product>[]);
-
-    return Column(
+  Widget build(BuildContext context) {
+    return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _SearchBar(
-          controller: controller,
-          focusNode: focusNode,
-          hasQuery: hasQuery,
-          onChanged: (value) {
-            ref.read(productSearchQueryProvider.notifier).state = value;
-          },
-          onClear: () {
-            controller.clear();
-            ref.read(productSearchQueryProvider.notifier).state = '';
-            focusNode.requestFocus();
-          },
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.asset(
+            HomeText.logoAsset,
+            width: compact ? 34 : 40,
+            height: compact ? 34 : 40,
+            fit: BoxFit.cover,
+          ),
         ),
-        if (isFocused && hasQuery)
-          _SearchSuggestionsDropdown(
-            suggestionsAsync: suggestionsAsync,
-            onProductSelected: (product) {
-              focusNode.unfocus();
-              onProductSelected(product);
-            },
+        const SizedBox(width: 8),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'GK ',
+                    style: TextStyle(color: AppColors.primary),
+                  ),
+                  TextSpan(
+                    text: 'MART',
+                    style: TextStyle(color: AppColors.accent),
+                  ),
+                ],
+              ),
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 18,
+                height: 1,
+                letterSpacing: 0,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            if (!compact) ...[
+              const SizedBox(height: 3),
+              const Text(
+                HomeText.supermarket,
+                maxLines: 1,
+                style: TextStyle(
+                  color: AppColors.mutedText,
+                  fontSize: 9,
+                  height: 1,
+                  letterSpacing: 0,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _IconButtonSurface extends StatelessWidget {
+  const _IconButtonSurface({
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: AppColors.background,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: 42,
+            height: 42,
+            child: Icon(icon, color: AppColors.primary, size: 24),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BadgeIconButton extends StatelessWidget {
+  const _BadgeIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.count,
+    required this.onTap,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        _IconButtonSurface(tooltip: tooltip, icon: icon, onTap: onTap),
+        if (count > 0)
+          Positioned(
+            right: -2,
+            top: -2,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 18),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.accent,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.card, width: 2),
+              ),
+              child: Text(
+                count > 99 ? '99+' : count.toString(),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  height: 1,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
           ),
       ],
     );
   }
 }
 
-class _SearchBar extends StatelessWidget {
-  const _SearchBar({
-    required this.controller,
-    required this.focusNode,
-    required this.hasQuery,
-    required this.onChanged,
-    required this.onClear,
-  });
-
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final bool hasQuery;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: _SearchUi.barHeight,
-      margin: const EdgeInsets.symmetric(horizontal: _SearchUi.sideMargin),
-      padding: const EdgeInsets.symmetric(horizontal: _SearchUi.barPadding),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(_SearchUi.radius),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: TextField(
-        controller: controller,
-        focusNode: focusNode,
-        decoration: InputDecoration(
-          icon: Icon(Icons.search, color: Colors.grey.shade700),
-          hintText: HomeText.searchHint,
-          border: InputBorder.none,
-          suffixIcon: hasQuery
-              ? IconButton(
-                  tooltip: HomeText.clearSearch,
-                  icon: const Icon(Icons.close),
-                  onPressed: onClear,
-                )
-              : null,
-        ),
-        onChanged: onChanged,
-      ),
-    );
-  }
-}
-
-class _SearchSuggestionsDropdown extends StatelessWidget {
-  const _SearchSuggestionsDropdown({
-    required this.suggestionsAsync,
-    required this.onProductSelected,
-  });
-
-  final AsyncValue<List<Product>> suggestionsAsync;
-  final ValueChanged<Product> onProductSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(
-        _SearchUi.sideMargin,
-        _SearchUi.dropdownTopGap,
-        _SearchUi.sideMargin,
-        0,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(_SearchUi.radius),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(_SearchUi.radius),
-        child: suggestionsAsync.when(
-          data: (products) {
-            if (products.isEmpty) {
-              return const _SearchMessage(message: HomeText.noSearchResults);
-            }
-
-            return ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxHeight: _SearchUi.maxDropdownHeight,
-              ),
-              child: ListView.separated(
-                padding: EdgeInsets.zero,
-                shrinkWrap: true,
-                itemCount: products.length,
-                separatorBuilder: (_, __) => Divider(
-                  height: 1,
-                  color: Colors.grey.shade200,
-                ),
-                itemBuilder: (context, index) {
-                  final product = products[index];
-
-                  return _SearchSuggestionTile(
-                    product: product,
-                    onTap: () => onProductSelected(product),
-                  );
-                },
-              ),
-            );
-          },
-          loading: () => const _SearchMessage(
-            message: HomeText.searchingProducts,
-            showProgress: true,
-          ),
-          error: (_, __) => const _SearchMessage(
-            message: HomeText.searchError,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SearchSuggestionTile extends StatelessWidget {
-  const _SearchSuggestionTile({
-    required this.product,
+class _DeliveryLocation extends StatelessWidget {
+  const _DeliveryLocation({
+    required this.address,
     required this.onTap,
   });
 
-  final Product product;
+  final String address;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: SizedBox(
-        height: _SearchUi.tileHeight,
+    final visibleAddress = address.trim();
+
+    return Material(
+      color: AppColors.card,
+      child: InkWell(
+        onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: _SearchUi.tileHorizontalPadding,
-            vertical: _SearchUi.tileVerticalPadding,
-          ),
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
           child: Row(
             children: [
-              _SearchSuggestionImage(imageUrl: product.imageUrl),
-              const SizedBox(width: 12),
+              Container(
+                width: 36,
+                height: 36,
+                decoration: const BoxDecoration(
+                  color: AppColors.softGreen,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.location_on_rounded,
+                  color: AppColors.primary,
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      product.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        height: 1.15,
-                      ),
+                    const Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            HomeText.deliverToHome,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.text,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 4),
+                        Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          color: AppColors.mutedText,
+                          size: 20,
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
-                      '\u20B9${_formatPrice(product.sellingPrice)}',
+                      visibleAddress.isEmpty
+                          ? HomeText.addDeliveryAddress
+                          : visibleAddress,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF166534),
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
+                      style: TextStyle(
+                        color: visibleAddress.isEmpty
+                            ? AppColors.accent
+                            : AppColors.mutedText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.north_east,
-                size: 17,
-                color: Colors.grey.shade500,
+              const Icon(Icons.chevron_right_rounded,
+                  color: AppColors.mutedText),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchSection extends StatelessWidget {
+  const _SearchSection({
+    required this.controller,
+    required this.focusNode,
+    required this.onSearchSubmitted,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final ValueChanged<String> onSearchSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: AppColors.card,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: AppColors.border),
+            boxShadow: AppShadows.soft,
+          ),
+          child: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: HomeText.searchHint,
+              hintStyle: const TextStyle(
+                color: AppColors.mutedText,
+                fontWeight: FontWeight.w500,
+              ),
+              prefixIcon: IconButton(
+                tooltip: HomeText.search,
+                icon: const Icon(
+                  Icons.search_rounded,
+                  color: AppColors.primary,
+                ),
+                onPressed: () => onSearchSubmitted(controller.text),
+              ),
+              suffixIcon: controller.text.trim().isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: HomeText.clearSearch,
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () {
+                        controller.clear();
+                        focusNode.requestFocus();
+                      },
+                    ),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 15),
+            ),
+            onSubmitted: onSearchSubmitted,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PromoBanner extends StatelessWidget {
+  const _PromoBanner({required this.onShopNow});
+
+  final VoidCallback onShopNow;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 22),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          boxShadow: AppShadows.card,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          child: Stack(
+            children: [
+              AspectRatio(
+                aspectRatio: 1.9,
+                child: AppCachedNetworkImage(
+                  imageUrl: HomeText.bannerImageUrl,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  memCacheWidth: HomeConfig.bannerMemCacheWidth,
+                  maxWidthDiskCache: HomeConfig.bannerDiskCacheWidth,
+                  placeholder: const _BannerImagePlaceholder(),
+                  errorPlaceholder: const _BannerImagePlaceholder(),
+                ),
+              ),
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.white.withValues(alpha: 0.96),
+                        Colors.white.withValues(alpha: 0.76),
+                        Colors.white.withValues(alpha: 0.08),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 235),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            HomeText.bannerTitle,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.text,
+                              fontSize: 22,
+                              height: 1.1,
+                              letterSpacing: 0,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            HomeText.bannerSubtitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.mutedText,
+                              fontSize: 13,
+                              height: 1.25,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          SizedBox(
+                            height: 38,
+                            child: ElevatedButton.icon(
+                              onPressed: onShopNow,
+                              icon: const Icon(
+                                Icons.shopping_bag_rounded,
+                                size: 17,
+                              ),
+                              label: const Text(HomeText.shopNow),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
@@ -540,142 +784,57 @@ class _SearchSuggestionTile extends StatelessWidget {
   }
 }
 
-class _SearchSuggestionImage extends StatelessWidget {
-  const _SearchSuggestionImage({required this.imageUrl});
-
-  final String imageUrl;
-
-  @override
-  Widget build(BuildContext context) {
-    final placeholder = Container(
-      width: _SearchUi.imageSize,
-      height: _SearchUi.imageSize,
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(_SearchUi.imageRadius),
-      ),
-      child: const Icon(Icons.image, color: Colors.black45, size: 20),
-    );
-
-    if (imageUrl.trim().isEmpty) return placeholder;
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(_SearchUi.imageRadius),
-      child: Image.network(
-        imageUrl,
-        width: _SearchUi.imageSize,
-        height: _SearchUi.imageSize,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => placeholder,
-      ),
-    );
-  }
-}
-
-class _SearchMessage extends StatelessWidget {
-  const _SearchMessage({
-    required this.message,
-    this.showProgress = false,
-  });
-
-  final String message;
-  final bool showProgress;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: _SearchUi.messageHeight,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (showProgress) ...[
-            const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(height: 8),
-          ],
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.grey.shade700,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SearchUi {
-  const _SearchUi._();
-
-  static const sideMargin = 14.0;
-  static const radius = 8.0;
-  static const barHeight = 48.0;
-  static const barPadding = 12.0;
-  static const dropdownTopGap = 8.0;
-  static const maxVisibleTiles = 5;
-  static const tileHeight = 66.0;
-  static const maxDropdownHeight = tileHeight * maxVisibleTiles;
-  static const tileHorizontalPadding = 12.0;
-  static const tileVerticalPadding = 8.0;
-  static const imageSize = 48.0;
-  static const imageRadius = 8.0;
-  static const messageHeight = 82.0;
-}
-
-class _CategoryStrip extends StatelessWidget {
-  const _CategoryStrip({
+class _CategorySection extends StatelessWidget {
+  const _CategorySection({
     required this.categoriesAsync,
-    required this.selectedCategoryId,
     required this.onCategorySelected,
+    required this.onRetry,
   });
 
   final AsyncValue<List<Category>> categoriesAsync;
-  final String? selectedCategoryId;
-  final ValueChanged<String?> onCategorySelected;
+  final ValueChanged<Category> onCategorySelected;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 100,
-      child: categoriesAsync.when(
-        data: (categories) {
-          if (categories.isEmpty) {
-            return const Center(child: Text(HomeText.noCategories));
-          }
-
-          return ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            itemCount: categories.length + 1,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (context, index) {
-              if (index == 0) {
-                return _CategoryTile(
-                  label: HomeText.allCategories,
-                  imageUrl: '',
-                  isSelected: selectedCategoryId == null,
-                  onTap: () => onCategorySelected(null),
-                );
-              }
-
-              final category = categories[index - 1];
-              return _CategoryTile(
-                label: category.name,
-                imageUrl: category.imageUrl,
-                isSelected: selectedCategoryId == category.id,
-                onTap: () => onCategorySelected(category.id),
+    return _Section(
+      title: HomeText.categoriesTitle,
+      child: SizedBox(
+        height: 116,
+        child: categoriesAsync.when(
+          data: (categories) {
+            if (categories.isEmpty) {
+              return const _InlineState(
+                icon: Icons.category_outlined,
+                message: HomeText.noCategories,
               );
-            },
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => const Center(child: Text(HomeText.categoriesError)),
+            }
+
+            return ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: categories.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final category = categories[index];
+
+                return _CategoryTile(
+                  label: category.name,
+                  imageUrl: category.imageUrl,
+                  icon: _categoryIconFor(category.name),
+                  isSelected: false,
+                  onTap: () => onCategorySelected(category),
+                );
+              },
+            );
+          },
+          loading: () => const _HorizontalLoadingTiles(),
+          error: (_, __) => _InlineState(
+            icon: Icons.error_outline_rounded,
+            message: HomeText.categoriesError,
+            onRetry: onRetry,
+          ),
+        ),
       ),
     );
   }
@@ -685,47 +844,67 @@ class _CategoryTile extends StatelessWidget {
   const _CategoryTile({
     required this.label,
     required this.imageUrl,
+    required this.icon,
     required this.isSelected,
     required this.onTap,
   });
 
   final String label;
   final String imageUrl;
+  final IconData icon;
   final bool isSelected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final borderColor =
-        isSelected ? const Color(0xFF16A34A) : Colors.grey.shade200;
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
-      child: Container(
-        width: 82,
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: borderColor, width: isSelected ? 1.5 : 1),
-        ),
+    return SizedBox(
+      width: 84,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        onTap: onTap,
         child: Column(
           children: [
-            _CategoryImage(imageUrl: imageUrl, isSelected: isSelected),
-            const SizedBox(height: 7),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 72,
+              height: 72,
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: isSelected ? AppColors.primary : AppColors.card,
+                shape: BoxShape.circle,
+                boxShadow: AppShadows.soft,
+              ),
+              child: ClipOval(
+                child: imageUrl.trim().isEmpty
+                    ? _CategoryIcon(icon: icon, isSelected: isSelected)
+                    : AppCachedNetworkImage(
+                        imageUrl: imageUrl,
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.medium,
+                        memCacheWidth: HomeConfig.categoryImageCacheExtent,
+                        memCacheHeight: HomeConfig.categoryImageCacheExtent,
+                        maxWidthDiskCache:
+                            HomeConfig.categoryImageDiskCacheExtent,
+                        maxHeightDiskCache:
+                            HomeConfig.categoryImageDiskCacheExtent,
+                        placeholder:
+                            _CategoryIcon(icon: icon, isSelected: isSelected),
+                        errorPlaceholder:
+                            _CategoryIcon(icon: icon, isSelected: isSelected),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 8),
             Text(
               label,
               maxLines: 2,
-              textAlign: TextAlign.center,
               overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 11,
+                color: isSelected ? AppColors.primary : AppColors.text,
+                fontSize: 12,
                 height: 1.15,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                color: isSelected
-                    ? const Color(0xFF166534)
-                    : const Color(0xFF374151),
+                fontWeight: FontWeight.w800,
               ),
             ),
           ],
@@ -735,142 +914,191 @@ class _CategoryTile extends StatelessWidget {
   }
 }
 
-class _CategoryImage extends StatelessWidget {
-  const _CategoryImage({
-    required this.imageUrl,
-    required this.isSelected,
-  });
-
-  final String imageUrl;
-  final bool isSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final placeholder = Container(
-      width: 46,
-      height: 46,
-      decoration: BoxDecoration(
-        color: isSelected ? Colors.green.shade50 : Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Icon(
-        Icons.category,
-        color: isSelected ? Colors.green.shade700 : Colors.grey.shade600,
-      ),
-    );
-
-    if (imageUrl.trim().isEmpty) return placeholder;
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.network(
-        imageUrl,
-        width: 46,
-        height: 46,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => placeholder,
-      ),
-    );
-  }
-}
-
-class _ProductsHeader extends StatelessWidget {
-  const _ProductsHeader({
-    required this.title,
-    required this.viewMode,
-    required this.onViewModeChanged,
-  });
-
-  final String title;
-  final _ProductViewMode viewMode;
-  final ValueChanged<_ProductViewMode> onViewModeChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          _ViewModeButton(
-            icon: Icons.grid_view,
-            tooltip: HomeText.gridView,
-            isSelected: viewMode == _ProductViewMode.grid,
-            onTap: () => onViewModeChanged(_ProductViewMode.grid),
-          ),
-          const SizedBox(width: 6),
-          _ViewModeButton(
-            icon: Icons.view_list,
-            tooltip: HomeText.listView,
-            isSelected: viewMode == _ProductViewMode.list,
-            onTap: () => onViewModeChanged(_ProductViewMode.list),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ViewModeButton extends StatelessWidget {
-  const _ViewModeButton({
+class _CategoryIcon extends StatelessWidget {
+  const _CategoryIcon({
     required this.icon,
-    required this.tooltip,
     required this.isSelected,
-    required this.onTap,
   });
 
   final IconData icon;
-  final String tooltip;
   final bool isSelected;
-  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFFDCFCE7) : Colors.white,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color:
-                  isSelected ? const Color(0xFF16A34A) : Colors.grey.shade200,
-            ),
-          ),
-          child: Icon(
-            icon,
-            size: 20,
-            color: isSelected ? const Color(0xFF166534) : Colors.grey.shade700,
-          ),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: isSelected ? AppColors.card : AppColors.softGreen,
+        shape: BoxShape.circle,
+      ),
+      child: Icon(icon, color: AppColors.primary, size: 30),
+    );
+  }
+}
+
+class _BannerImagePlaceholder extends StatelessWidget {
+  const _BannerImagePlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const AppImagePlaceholder(
+      icon: Icons.local_grocery_store_rounded,
+      iconSize: 40,
+    );
+  }
+}
+
+class _ProductsAsyncSection extends StatelessWidget {
+  const _ProductsAsyncSection({
+    required this.title,
+    required this.emptyMessage,
+    required this.productsAsync,
+    required this.cartQtyById,
+    required this.wishlistedProductIds,
+    required this.wishlistPendingProductIds,
+    required this.onRetry,
+    required this.onOpen,
+    required this.onAdd,
+    required this.onIncrement,
+    required this.onDecrement,
+    required this.onToggleWishlist,
+    this.onlyDiscounted = false,
+    this.maxProducts,
+    this.isLoadingMore = false,
+    this.hasMore = false,
+    this.onLoadMore,
+  });
+
+  final String title;
+  final String emptyMessage;
+  final AsyncValue<List<Product>> productsAsync;
+  final Map<String, int> cartQtyById;
+  final Set<String> wishlistedProductIds;
+  final Set<String> wishlistPendingProductIds;
+  final VoidCallback onRetry;
+  final ValueChanged<Product> onOpen;
+  final ValueChanged<Product> onAdd;
+  final ValueChanged<Product> onIncrement;
+  final ValueChanged<Product> onDecrement;
+  final ValueChanged<Product> onToggleWishlist;
+  final bool onlyDiscounted;
+  final int? maxProducts;
+  final bool isLoadingMore;
+  final bool hasMore;
+  final VoidCallback? onLoadMore;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Section(
+      title: title,
+      child: productsAsync.when(
+        data: (products) {
+          final visibleProducts = products.where((product) {
+            if (onlyDiscounted) return _discountPercent(product) > 0;
+            return true;
+          }).toList();
+
+          if (onlyDiscounted) {
+            visibleProducts.sort((a, b) {
+              return _discountPercent(b).compareTo(_discountPercent(a));
+            });
+          }
+
+          final limitedProducts = maxProducts == null
+              ? visibleProducts
+              : visibleProducts.take(maxProducts!).toList();
+
+          if (limitedProducts.isEmpty) {
+            return _InlineState(
+              icon: onlyDiscounted
+                  ? Icons.local_offer_outlined
+                  : Icons.shopping_basket_outlined,
+              message: emptyMessage,
+            );
+          }
+
+          return Column(
+            children: [
+              _ProductGrid(
+                products: limitedProducts,
+                cartQtyById: cartQtyById,
+                wishlistedProductIds: wishlistedProductIds,
+                wishlistPendingProductIds: wishlistPendingProductIds,
+                onOpen: onOpen,
+                onAdd: onAdd,
+                onIncrement: onIncrement,
+                onDecrement: onDecrement,
+                onToggleWishlist: onToggleWishlist,
+              ),
+              if (onLoadMore != null && !onlyDiscounted)
+                _ProductLoadMoreFooter(
+                  isLoading: isLoadingMore,
+                  hasMore: hasMore,
+                  onLoadMore: onLoadMore!,
+                ),
+            ],
+          );
+        },
+        loading: () => const _ProductGridSkeleton(),
+        error: (_, __) => _InlineState(
+          icon: Icons.error_outline_rounded,
+          message: HomeText.productsError,
+          onRetry: onRetry,
         ),
       ),
     );
   }
 }
 
-class _ProductsBody extends StatelessWidget {
-  const _ProductsBody({
-    required this.productsAsync,
-    required this.selectedCategoryId,
-    required this.selectedCategory,
+class _ProductLoadMoreFooter extends StatelessWidget {
+  const _ProductLoadMoreFooter({
+    required this.isLoading,
+    required this.hasMore,
+    required this.onLoadMore,
+  });
+
+  final bool isLoading;
+  final bool hasMore;
+  final VoidCallback onLoadMore;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (!hasMore) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 14),
+        child: Text(
+          HomeText.endOfProducts,
+          style: TextStyle(
+            color: AppColors.mutedText,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: OutlinedButton.icon(
+        onPressed: onLoadMore,
+        icon: const Icon(Icons.expand_more_rounded),
+        label: const Text(HomeText.loadMore),
+      ),
+    );
+  }
+}
+
+class _ProductGrid extends StatelessWidget {
+  const _ProductGrid({
+    required this.products,
     required this.cartQtyById,
     required this.wishlistedProductIds,
-    required this.viewMode,
+    required this.wishlistPendingProductIds,
     required this.onOpen,
     required this.onAdd,
     required this.onIncrement,
@@ -878,12 +1106,10 @@ class _ProductsBody extends StatelessWidget {
     required this.onToggleWishlist,
   });
 
-  final AsyncValue<List<Product>> productsAsync;
-  final String? selectedCategoryId;
-  final Category? selectedCategory;
+  final List<Product> products;
   final Map<String, int> cartQtyById;
   final Set<String> wishlistedProductIds;
-  final _ProductViewMode viewMode;
+  final Set<String> wishlistPendingProductIds;
   final ValueChanged<Product> onOpen;
   final ValueChanged<Product> onAdd;
   final ValueChanged<Product> onIncrement;
@@ -892,567 +1118,284 @@ class _ProductsBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return productsAsync.when(
-      data: (products) {
-        final filteredProducts = products.where(_matchesCategory).toList();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final aspectRatio = constraints.maxWidth >= 720 ? 0.98 : 0.78;
 
-        if (filteredProducts.isEmpty) {
-          return const Center(child: Text(HomeText.noProducts));
-        }
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: products.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 14,
+            mainAxisSpacing: 14,
+            childAspectRatio: aspectRatio,
+          ),
+          itemBuilder: (context, index) {
+            final product = products[index];
 
-        if (viewMode == _ProductViewMode.list) {
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-            itemCount: filteredProducts.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final product = filteredProducts[index];
-              return _ProductListCard(
-                product: product,
-                quantity: cartQtyById[product.id] ?? 0,
-                isWishlisted: wishlistedProductIds.contains(product.id),
-                onOpen: () => onOpen(product),
-                onAdd: () => onAdd(product),
-                onIncrement: () => onIncrement(product),
-                onDecrement: () => onDecrement(product),
-                onToggleWishlist: () => onToggleWishlist(product),
-              );
-            },
-          );
-        }
-
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final crossAxisCount = constraints.maxWidth >= 720 ? 3 : 2;
-
-            return GridView.builder(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-              itemCount: filteredProducts.length,
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: constraints.maxWidth >= 720 ? 0.78 : 0.66,
+            return GkProductCard(
+              product: product,
+              quantity: cartQtyById[product.id] ?? 0,
+              onTap: () => onOpen(product),
+              onAdd: () => onAdd(product),
+              onIncrement: () => onIncrement(product),
+              onDecrement: () => onDecrement(product),
+              isWishlisted: wishlistedProductIds.contains(product.id),
+              isWishlistUpdating: wishlistPendingProductIds.contains(
+                product.id,
               ),
-              itemBuilder: (context, index) {
-                final product = filteredProducts[index];
-                return _ProductGridCard(
-                  product: product,
-                  quantity: cartQtyById[product.id] ?? 0,
-                  isWishlisted: wishlistedProductIds.contains(product.id),
-                  onOpen: () => onOpen(product),
-                  onAdd: () => onAdd(product),
-                  onIncrement: () => onIncrement(product),
-                  onDecrement: () => onDecrement(product),
-                  onToggleWishlist: () => onToggleWishlist(product),
-                );
-              },
+              onToggleWishlist: () => onToggleWishlist(product),
             );
           },
         );
       },
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) => const Center(child: Text(HomeText.productsError)),
     );
-  }
-
-  bool _matchesCategory(Product product) {
-    final categoryId = selectedCategoryId;
-    if (categoryId == null) return true;
-
-    final productCategory = product.categoryId.trim().toLowerCase();
-    if (productCategory == categoryId.trim().toLowerCase()) return true;
-
-    final categoryName = selectedCategory?.name.trim().toLowerCase();
-    return categoryName != null &&
-        categoryName.isNotEmpty &&
-        productCategory == categoryName;
   }
 }
 
-class _ProductGridCard extends StatelessWidget {
-  const _ProductGridCard({
-    required this.product,
-    required this.quantity,
-    required this.isWishlisted,
-    required this.onOpen,
-    required this.onAdd,
-    required this.onIncrement,
-    required this.onDecrement,
-    required this.onToggleWishlist,
+class _Section extends StatelessWidget {
+  const _Section({
+    required this.title,
+    required this.child,
   });
 
-  final Product product;
-  final int quantity;
-  final bool isWishlisted;
-  final VoidCallback onOpen;
-  final VoidCallback onAdd;
-  final VoidCallback onIncrement;
-  final VoidCallback onDecrement;
-  final VoidCallback onToggleWishlist;
+  final String title;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onOpen,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey.shade200),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _ProductImage(
-                imageUrl: product.imageUrl,
-                isAvailable: product.isAvailable,
-                discountPercent: _discountPercent(product),
-                isWishlisted: isWishlisted,
-                onToggleWishlist: onToggleWishlist,
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(9),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        product.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          height: 1.15,
-                        ),
-                      ),
-                      if (product.unit.trim().isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          product.unit,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                      const Spacer(),
-                      _ProductPrice(product: product),
-                      const SizedBox(height: 8),
-                      _CartAction(
-                        isAvailable: product.isAvailable,
-                        quantity: quantity,
-                        onAdd: onAdd,
-                        onIncrement: onIncrement,
-                        onDecrement: onDecrement,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ProductListCard extends StatelessWidget {
-  const _ProductListCard({
-    required this.product,
-    required this.quantity,
-    required this.isWishlisted,
-    required this.onOpen,
-    required this.onAdd,
-    required this.onIncrement,
-    required this.onDecrement,
-    required this.onToggleWishlist,
-  });
-
-  final Product product;
-  final int quantity;
-  final bool isWishlisted;
-  final VoidCallback onOpen;
-  final VoidCallback onAdd;
-  final VoidCallback onIncrement;
-  final VoidCallback onDecrement;
-  final VoidCallback onToggleWishlist;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onOpen,
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey.shade200),
-          ),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 92,
-                child: _ProductImage(
-                  imageUrl: product.imageUrl,
-                  isAvailable: product.isAvailable,
-                  discountPercent: _discountPercent(product),
-                  isWishlisted: isWishlisted,
-                  onToggleWishlist: onToggleWishlist,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      product.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    if (product.unit.trim().isNotEmpty) ...[
-                      const SizedBox(height: 5),
-                      Text(
-                        product.unit,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.grey.shade600,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 10),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(child: _ProductPrice(product: product)),
-                        const SizedBox(width: 10),
-                        _CartAction(
-                          isAvailable: product.isAvailable,
-                          quantity: quantity,
-                          onAdd: onAdd,
-                          onIncrement: onIncrement,
-                          onDecrement: onDecrement,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ProductImage extends StatelessWidget {
-  const _ProductImage({
-    required this.imageUrl,
-    required this.isAvailable,
-    required this.discountPercent,
-    required this.isWishlisted,
-    required this.onToggleWishlist,
-  });
-
-  final String imageUrl;
-  final bool isAvailable;
-  final int discountPercent;
-  final bool isWishlisted;
-  final VoidCallback onToggleWishlist;
-
-  @override
-  Widget build(BuildContext context) {
-    final placeholder = AspectRatio(
-      aspectRatio: 1.18,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.grey.shade100,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
-        ),
-        child: const Center(child: Icon(Icons.image)),
-      ),
-    );
-
-    return Stack(
-      children: [
-        ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
-          child: imageUrl.trim().isEmpty
-              ? placeholder
-              : AspectRatio(
-                  aspectRatio: 1.18,
-                  child: Image.network(
-                    imageUrl,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => placeholder,
-                  ),
-                ),
-        ),
-        if (discountPercent > 0)
-          Positioned(
-            left: 6,
-            top: 6,
-            child: _DiscountBadge(discountPercent: discountPercent),
-          ),
-        if (!isAvailable)
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.58),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(8),
-                ),
-              ),
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black87,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Text(
-                    HomeText.outOfStock,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        Positioned(
-          right: 6,
-          top: 6,
-          child: Tooltip(
-            message: isWishlisted
-                ? HomeText.removeFromWishlist
-                : HomeText.addToWishlist,
-            child: Material(
-              color: Colors.white.withValues(alpha: 0.94),
-              shape: const CircleBorder(),
-              child: InkWell(
-                customBorder: const CircleBorder(),
-                onTap: onToggleWishlist,
-                child: SizedBox(
-                  width: 34,
-                  height: 34,
-                  child: Icon(
-                    isWishlisted ? Icons.favorite : Icons.favorite_border,
-                    color: isWishlisted
-                        ? const Color(0xFFE11D48)
-                        : Colors.grey.shade700,
-                    size: 20,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _DiscountBadge extends StatelessWidget {
-  const _DiscountBadge({required this.discountPercent});
-
-  final int discountPercent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF7ED),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFF97316)),
-      ),
-      child: Text(
-        '$discountPercent% ${HomeText.off}',
-        style: const TextStyle(
-          color: Color(0xFFC2410C),
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-}
-
-class _ProductPrice extends StatelessWidget {
-  const _ProductPrice({required this.product});
-
-  final Product product;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasDiscount = _discountPercent(product) > 0;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '\u20B9${_formatPrice(product.sellingPrice)}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: Color(0xFF166534),
-            fontWeight: FontWeight.bold,
-            fontSize: 15,
-          ),
-        ),
-        if (hasDiscount)
-          Text(
-            '\u20B9${_formatPrice(product.price)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 12,
-              decoration: TextDecoration.lineThrough,
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-String _formatPrice(double price) {
-  return price % 1 == 0 ? price.toStringAsFixed(0) : price.toStringAsFixed(2);
-}
-
-class _CartAction extends StatelessWidget {
-  const _CartAction({
-    required this.isAvailable,
-    required this.quantity,
-    required this.onAdd,
-    required this.onIncrement,
-    required this.onDecrement,
-  });
-
-  final bool isAvailable;
-  final int quantity;
-  final VoidCallback onAdd;
-  final VoidCallback onIncrement;
-  final VoidCallback onDecrement;
-
-  @override
-  Widget build(BuildContext context) {
-    if (!isAvailable) {
-      return Container(
-        height: 32,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: Colors.grey.shade200,
-          borderRadius: BorderRadius.circular(7),
-        ),
-        child: Text(
-          HomeText.notAvailable,
-          style: TextStyle(
-            color: Colors.grey.shade700,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      );
-    }
-
-    if (quantity <= 0) {
-      return SizedBox(
-        height: 32,
-        child: OutlinedButton(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xFF15803D),
-            side: const BorderSide(color: Color(0xFF16A34A)),
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            textStyle: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(7),
-            ),
-          ),
-          onPressed: onAdd,
-          child: const Text(HomeText.add),
-        ),
-      );
-    }
-
-    return Container(
-      height: 32,
-      decoration: BoxDecoration(
-        color: const Color(0xFF16A34A),
-        borderRadius: BorderRadius.circular(7),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _QuantityButton(icon: Icons.remove, onTap: onDecrement),
-          SizedBox(
-            width: 28,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Text(
-              quantity.toString(),
-              textAlign: TextAlign.center,
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+                color: AppColors.text,
+                fontSize: 19,
+                height: 1.15,
+                letterSpacing: 0,
+                fontWeight: FontWeight.w900,
               ),
             ),
           ),
-          _QuantityButton(icon: Icons.add, onTap: onIncrement),
+          child,
         ],
       ),
     );
   }
 }
 
-class _QuantityButton extends StatelessWidget {
-  const _QuantityButton({
+class _InlineState extends StatelessWidget {
+  const _InlineState({
     required this.icon,
-    required this.onTap,
+    required this.message,
+    this.onRetry,
   });
 
   final IconData icon;
-  final VoidCallback onTap;
+  final String message;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(7),
-      child: SizedBox(
-        width: 30,
-        height: 32,
-        child: Icon(icon, color: Colors.white, size: 17),
+    return Container(
+      height: 92,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.soft,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppColors.softGreen,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+            child: Icon(icon, color: AppColors.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppColors.mutedText,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          if (onRetry != null) ...[
+            const SizedBox(width: 10),
+            TextButton(
+              onPressed: onRetry,
+              child: const Text(HomeText.retry),
+            ),
+          ],
+        ],
       ),
     );
   }
 }
 
+class _HorizontalLoadingTiles extends StatelessWidget {
+  const _HorizontalLoadingTiles();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: 5,
+      separatorBuilder: (_, __) => const SizedBox(width: 12),
+      itemBuilder: (context, index) {
+        return Container(
+          width: 84,
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ProductGridSkeleton extends StatelessWidget {
+  const _ProductGridSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: 4,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 14,
+        mainAxisSpacing: 14,
+        childAspectRatio: 0.78,
+      ),
+      itemBuilder: (context, index) {
+        return Container(
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: AppColors.border),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _HomeDrawer extends StatelessWidget {
+  const _HomeDrawer();
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      backgroundColor: AppColors.card,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 18),
+              child: _BrandLockup(compact: true),
+            ),
+            const Divider(height: 1, color: AppColors.border),
+            ListTile(
+              leading: const Icon(Icons.home_rounded),
+              title: const Text(HomeText.home),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.receipt_long_rounded),
+              title: const Text(HomeText.orders),
+              onTap: () {
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                navigator.push(
+                  MaterialPageRoute(builder: (_) => const OrdersScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.support_agent_rounded),
+              title: const Text(HomeText.customerSupport),
+              onTap: () {
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                showCustomerSupportSheet(navigator.context);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+IconData _categoryIconFor(String name) {
+  final normalized = name.toLowerCase();
+
+  if (normalized.contains('rice') ||
+      normalized.contains('atta') ||
+      normalized.contains('grain')) {
+    return Icons.rice_bowl_rounded;
+  }
+  if (normalized.contains('dal') || normalized.contains('pulse')) {
+    return Icons.grain_rounded;
+  }
+  if (normalized.contains('milk') || normalized.contains('dairy')) {
+    return Icons.local_drink_rounded;
+  }
+  if (normalized.contains('oil') || normalized.contains('ghee')) {
+    return Icons.water_drop_rounded;
+  }
+  if (normalized.contains('snack') || normalized.contains('biscuit')) {
+    return Icons.cookie_rounded;
+  }
+  if (normalized.contains('chocolate') || normalized.contains('sweet')) {
+    return Icons.cake_rounded;
+  }
+  if (normalized.contains('beverage') || normalized.contains('drink')) {
+    return Icons.local_cafe_rounded;
+  }
+  if (normalized.contains('care') || normalized.contains('personal')) {
+    return Icons.spa_rounded;
+  }
+  if (normalized.contains('home') || normalized.contains('household')) {
+    return Icons.cleaning_services_rounded;
+  }
+  if (normalized.contains('spice') || normalized.contains('masala')) {
+    return Icons.restaurant_rounded;
+  }
+
+  return Icons.local_grocery_store_rounded;
+}
+
 int _discountPercent(Product product) {
-  if (product.discountPrice <= 0 || product.discountPrice >= product.price) {
+  if (product.discountPrice <= 0 ||
+      product.price <= 0 ||
+      product.discountPrice >= product.price) {
     return 0;
   }
 
@@ -1460,31 +1403,50 @@ int _discountPercent(Product product) {
       .round();
 }
 
-enum _ProductViewMode { grid, list }
+class HomeConfig {
+  const HomeConfig._();
+
+  static const topOfferLimit = 4;
+  static const productsScrollOffset = 560.0;
+  static const loadMoreExtent = 520.0;
+  static const bannerMemCacheWidth = 900;
+  static const bannerDiskCacheWidth = 900;
+  static const categoryImageCacheExtent = 160;
+  static const categoryImageDiskCacheExtent = 220;
+}
 
 class HomeText {
   const HomeText._();
 
-  static const defaultGreetingName = 'there';
-  static const greetingPrefix = 'Hello,';
-  static const searchHint = 'Search products';
+  static const logoAsset = 'assets/SLV_super_market.png';
+  static const supermarket = 'SUPERMARKET';
+  static const menu = 'Menu';
+  static const notifications = 'Notifications';
+  static const noNotifications = 'No new notifications';
+  static const cart = 'Cart';
+  static const deliverToHome = 'Deliver to Home';
+  static const addDeliveryAddress = 'Add delivery address';
+  static const search = 'Search';
+  static const searchHint = 'Search for products...';
   static const clearSearch = 'Clear search';
-  static const searchingProducts = 'Searching products';
-  static const noSearchResults = 'No products found';
-  static const searchError = 'Unable to search products';
-  static const allCategories = 'All';
-  static const allProducts = 'All Products';
-  static const noCategories = 'No categories added';
+  static const bannerTitle = 'Best Quality. Best Prices. Everyday!';
+  static const bannerSubtitle = 'Fresh groceries delivered to your door.';
+  static const bannerImageUrl =
+      'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=82';
+  static const shopNow = 'Shop Now';
+  static const categoriesTitle = 'Shop by Category';
+  static const noCategories = 'No categories available yet';
   static const categoriesError = 'Unable to load categories';
+  static const topOffersTitle = 'Top Offers';
+  static const productsTitle = 'Products';
+  static const noOffers = 'No active product offers right now';
   static const noProducts = 'No products found';
   static const productsError = 'Unable to load products';
-  static const gridView = 'Grid view';
-  static const listView = 'List view';
-  static const outOfStock = 'Out of Stock';
-  static const notAvailable = 'NA';
-  static const add = 'ADD';
-  static const off = 'OFF';
-  static const addToWishlist = 'Add to wishlist';
-  static const removeFromWishlist = 'Remove from wishlist';
+  static const loadMore = 'Load more';
+  static const endOfProducts = 'All loaded products are visible';
+  static const retry = 'Retry';
   static const wishlistUpdateError = 'Unable to update wishlist';
+  static const home = 'Home';
+  static const orders = 'Orders';
+  static const customerSupport = 'Customer Support';
 }

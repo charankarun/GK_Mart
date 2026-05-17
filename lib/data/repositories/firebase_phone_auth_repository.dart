@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../domain/entities/app_user.dart';
 import '../../domain/entities/auth_session.dart';
 import '../../domain/repositories/phone_auth_repository.dart';
@@ -22,24 +23,30 @@ class FirebasePhoneAuthRepository implements PhoneAuthRepository {
     required void Function(String message) onVerificationFailed,
     required Future<void> Function(AuthSession session) onAutoVerified,
   }) {
-    return _auth.verifyPhoneNumber(
-      phoneNumber: phoneNumber,
-      verificationCompleted: (credential) async {
-        final result = await _auth.signInWithCredential(credential);
-        final session = await _ensureSession(
-          result.user,
-          fallbackPhone: phoneNumber,
-        );
-        await onAutoVerified(session);
-      },
-      verificationFailed: (exception) {
-        onVerificationFailed(exception.message ?? 'Phone verification failed');
-      },
-      codeSent: (verificationId, _) {
-        onCodeSent(verificationId);
-      },
-      codeAutoRetrievalTimeout: (_) {},
-    );
+    return _auth
+        .verifyPhoneNumber(
+          phoneNumber: phoneNumber,
+          verificationCompleted: (credential) async {
+            final result = await _auth
+                .signInWithCredential(credential)
+                .timeout(AppDurations.networkTimeout);
+            final session = await _ensureSession(
+              result.user,
+              fallbackPhone: phoneNumber,
+            );
+            await onAutoVerified(session);
+          },
+          verificationFailed: (exception) {
+            onVerificationFailed(
+              exception.message ?? 'Phone verification failed',
+            );
+          },
+          codeSent: (verificationId, _) {
+            onCodeSent(verificationId);
+          },
+          codeAutoRetrievalTimeout: (_) {},
+        )
+        .timeout(AppDurations.networkTimeout);
   }
 
   @override
@@ -52,7 +59,9 @@ class FirebasePhoneAuthRepository implements PhoneAuthRepository {
       verificationId: verificationId,
       smsCode: smsCode.trim(),
     );
-    final result = await _auth.signInWithCredential(credential);
+    final result = await _auth
+        .signInWithCredential(credential)
+        .timeout(AppDurations.networkTimeout);
     return _ensureSession(result.user, fallbackPhone: fallbackPhone);
   }
 

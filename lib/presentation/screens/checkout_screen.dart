@@ -1,11 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/app_error_handler.dart';
+import '../../core/notifications/notification_service.dart';
+import '../../core/theme/app_theme.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/order.dart';
 import '../providers/auth_providers.dart';
 import '../providers/commerce_providers.dart';
 import '../providers/order_providers.dart';
+import 'address_screen.dart';
 import 'order_success_screen.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
@@ -52,6 +58,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       nameController.text = profile.name.trim();
       phoneController.text = profile.phone.trim();
       addressController.text = profile.address.trim();
+      pincodeController.text = _extractPincode(profile.address);
     }
 
     final cartItems = ref.watch(cartItemsProvider);
@@ -73,6 +80,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                       padding: const EdgeInsets.all(12),
                       children: [
                         _OrderItemsPreview(items: cartItems),
+                        const SizedBox(height: 12),
+                        _SavedAddressCard(
+                          address: profile?.address ?? '',
+                          onManageAddress: _openAddressScreen,
+                        ),
                         const SizedBox(height: 12),
                         _CheckoutFields(
                           nameController: nameController,
@@ -113,7 +125,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     required double total,
     required double savings,
   }) async {
-    if (!formKey.currentState!.validate() || cartItems.isEmpty) return;
+    if (ref.read(orderCreationControllerProvider).isLoading) return;
+    if (formKey.currentState?.validate() != true || cartItems.isEmpty) return;
 
     final request = CreateOrderRequest(
       userId: userId,
@@ -127,24 +140,45 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     );
 
     try {
-      await ref.read(orderCreationControllerProvider.notifier).createOrder(
-            request,
-          );
+      final orderId =
+          await ref.read(orderCreationControllerProvider.notifier).createOrder(
+                request,
+              );
+      unawaited(
+        NotificationService.instance.showOrderStatusNotification(
+          orderId: orderId,
+          status: OrderStatus.placed,
+        ),
+      );
       ref.read(cartControllerProvider.notifier).clear();
       ref.read(orderCreationControllerProvider.notifier).reset();
 
       if (!mounted) return;
-      Navigator.pushAndRemoveUntil(
+      Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const OrderSuccessScreen()),
-        (route) => false,
       );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(CheckoutText.placeOrderError)),
+    } catch (error) {
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: CheckoutText.placeOrderError,
       );
     }
+  }
+
+  Future<void> _openAddressScreen() async {
+    final savedAddress = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const AddressScreen()),
+    );
+
+    if (!mounted) return;
+    if (savedAddress == null || savedAddress.trim().isEmpty) return;
+
+    addressController.text = savedAddress.trim();
+    final pincode = _extractPincode(savedAddress);
+    if (pincode.isNotEmpty) pincodeController.text = pincode;
   }
 
   OrderItem _toOrderItem(CartItem item) {
@@ -157,6 +191,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       imageUrl: item.imageUrl,
       unit: item.unit,
     );
+  }
+
+  String _extractPincode(String address) {
+    final match = RegExp(r'\b[0-9]{6}\b').firstMatch(address);
+    return match?.group(0) ?? '';
   }
 }
 
@@ -197,6 +236,73 @@ class _OrderItemsPreview extends StatelessWidget {
 
   String _formatPrice(double price) {
     return price % 1 == 0 ? price.toStringAsFixed(0) : price.toStringAsFixed(2);
+  }
+}
+
+class _SavedAddressCard extends StatelessWidget {
+  const _SavedAddressCard({
+    required this.address,
+    required this.onManageAddress,
+  });
+
+  final String address;
+  final VoidCallback onManageAddress;
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleAddress = address.trim();
+
+    return _CheckoutSection(
+      title: CheckoutText.savedAddress,
+      trailing: TextButton.icon(
+        onPressed: onManageAddress,
+        icon: Icon(
+          visibleAddress.isEmpty ? Icons.add_location_alt : Icons.edit_location,
+          size: 18,
+        ),
+        label: Text(
+          visibleAddress.isEmpty
+              ? CheckoutText.addAddress
+              : CheckoutText.changeAddress,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: visibleAddress.isEmpty
+                  ? AppColors.softOrange
+                  : AppColors.softGreen,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+            child: Icon(
+              Icons.location_on_rounded,
+              color:
+                  visibleAddress.isEmpty ? AppColors.accent : AppColors.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              visibleAddress.isEmpty
+                  ? CheckoutText.noSavedAddress
+                  : visibleAddress,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color:
+                    visibleAddress.isEmpty ? AppColors.accent : AppColors.text,
+                height: 1.3,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -306,7 +412,7 @@ class _CheckoutInput extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadii.md),
         ),
       ),
     );
@@ -322,11 +428,11 @@ class _PaymentMethodCard extends StatelessWidget {
       title: CheckoutText.payment,
       child: Row(
         children: [
-          Icon(Icons.payments, color: Color(0xFF16A34A)),
+          Icon(Icons.payments, color: AppColors.primary),
           SizedBox(width: 10),
           Text(CheckoutText.cashOnDelivery),
           Spacer(),
-          Icon(Icons.check_circle, color: Color(0xFF16A34A)),
+          Icon(Icons.check_circle, color: AppColors.primary),
         ],
       ),
     );
@@ -337,10 +443,12 @@ class _CheckoutSection extends StatelessWidget {
   const _CheckoutSection({
     required this.title,
     required this.child,
+    this.trailing,
   });
 
   final String title;
   final Widget child;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -348,16 +456,27 @@ class _CheckoutSection extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade200),
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.soft,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(fontWeight: FontWeight.bold),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (trailing != null) trailing!,
+            ],
           ),
           const SizedBox(height: 10),
           child,
@@ -384,10 +503,15 @@ class _CheckoutSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         boxShadow: [
-          BoxShadow(color: Colors.black12, blurRadius: 8),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 14,
+            offset: const Offset(0, -4),
+          ),
         ],
       ),
       child: Column(
@@ -401,7 +525,7 @@ class _CheckoutSummary extends StatelessWidget {
           _SummaryRow(
             label: CheckoutText.savings,
             value: '\u20B9${_formatPrice(savings)}',
-            valueColor: const Color(0xFF15803D),
+            valueColor: AppColors.primary,
           ),
           const SizedBox(height: 14),
           SizedBox(
@@ -409,9 +533,9 @@ class _CheckoutSummary extends StatelessWidget {
             height: 48,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF16A34A),
+                backgroundColor: AppColors.primary,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(AppRadii.md),
                 ),
               ),
               onPressed: isLoading ? null : onPlaceOrder,
@@ -477,6 +601,10 @@ class CheckoutText {
   static const loginRequired = 'Please login to checkout';
   static const emptyCart = 'Your cart is empty';
   static const items = 'Items';
+  static const savedAddress = 'Saved Address';
+  static const noSavedAddress = 'No saved address yet';
+  static const addAddress = 'Add';
+  static const changeAddress = 'Change';
   static const deliveryDetails = 'Delivery Details';
   static const name = 'Name';
   static const phone = 'Phone';

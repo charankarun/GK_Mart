@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/app_error_handler.dart';
 import '../../domain/entities/customer_order.dart';
 import '../providers/order_providers.dart';
+import '../widgets/app_state_widgets.dart';
 
 class OrderDetailsScreen extends ConsumerWidget {
   const OrderDetailsScreen({
@@ -98,21 +100,23 @@ class OrderDetailsScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 10),
                 Expanded(
-                  child: ListView.builder(
-                    itemCount: order.items.length,
-                    itemBuilder: (context, index) {
-                      final item = order.items[index];
+                  child: order.items.isEmpty
+                      ? const Center(child: Text('No items in this order'))
+                      : ListView.builder(
+                          itemCount: order.items.length,
+                          itemBuilder: (context, index) {
+                            final item = order.items[index];
 
-                      return Card(
-                        child: ListTile(
-                          title: Text(item.name),
-                          subtitle: Text(
-                            '\u20B9${_formatPrice(item.price)} x ${item.quantity}',
-                          ),
+                            return Card(
+                              child: ListTile(
+                                title: Text(item.name),
+                                subtitle: Text(
+                                  '\u20B9${_formatPrice(item.price)} x ${item.quantity}',
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
                 ),
                 const Divider(),
                 const SizedBox(height: 10),
@@ -127,8 +131,16 @@ class OrderDetailsScreen extends ConsumerWidget {
             ),
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => const Center(child: Text('Unable to load order')),
+        loading: () => const AppLoadingState(),
+        error: (error, _) => AppRetryState(
+          icon: Icons.error_outline_rounded,
+          title: 'Unable to load order',
+          message: AppErrorHandler.messageFor(
+            error,
+            fallback: 'Please try again in a moment.',
+          ),
+          onRetry: () => ref.invalidate(orderDetailsProvider(orderId)),
+        ),
       ),
     );
   }

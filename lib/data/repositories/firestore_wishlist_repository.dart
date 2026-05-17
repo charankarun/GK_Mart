@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/constants/app_constants.dart';
+import '../../core/errors/repository_exception.dart';
 import '../../domain/repositories/wishlist_repository.dart';
 
 class FirestoreWishlistRepository implements WishlistRepository {
@@ -8,18 +10,25 @@ class FirestoreWishlistRepository implements WishlistRepository {
   final FirebaseFirestore _firestore;
 
   DocumentReference<Map<String, dynamic>> _wishlistDoc(String userId) {
-    return _firestore.collection('wishlist').doc(userId);
+    return _firestore.collection(FirestoreCollections.wishlist).doc(userId);
   }
 
   @override
   Stream<List<String>> watchWishlistProductIds(String userId) {
-    return _wishlistDoc(userId).snapshots().map((snapshot) {
-      final data = snapshot.data() ?? const <String, dynamic>{};
-      final productIds = data['productIds'];
-      if (productIds is! Iterable) return const <String>[];
+    final normalizedUserId = _normalizeUserId(userId);
 
-      return _normalizeProductIds(productIds);
-    });
+    return RepositoryGuard.watch(
+      message: 'Unable to load wishlist.',
+      create: () {
+        return _wishlistDoc(normalizedUserId).snapshots().map((snapshot) {
+          final data = snapshot.data() ?? const <String, dynamic>{};
+          final productIds = data[FirestoreFields.productIds];
+          if (productIds is! Iterable) return const <String>[];
+
+          return _normalizeProductIds(productIds);
+        });
+      },
+    );
   }
 
   @override
@@ -27,10 +36,18 @@ class FirestoreWishlistRepository implements WishlistRepository {
     required String userId,
     required String productId,
   }) {
+    final normalizedUserId = _normalizeUserId(userId);
     final normalizedProductId = _normalizeProductId(productId);
-    return _wishlistDoc(userId).set({
-      'productIds': FieldValue.arrayUnion([normalizedProductId]),
-    }, SetOptions(merge: true));
+    return RepositoryGuard.run(
+      message: 'Unable to update wishlist.',
+      action: () {
+        return _wishlistDoc(normalizedUserId).set({
+          FirestoreFields.productIds: FieldValue.arrayUnion([
+            normalizedProductId,
+          ]),
+        }, SetOptions(merge: true)).timeout(AppDurations.networkTimeout);
+      },
+    );
   }
 
   @override
@@ -38,10 +55,18 @@ class FirestoreWishlistRepository implements WishlistRepository {
     required String userId,
     required String productId,
   }) {
+    final normalizedUserId = _normalizeUserId(userId);
     final normalizedProductId = _normalizeProductId(productId);
-    return _wishlistDoc(userId).set({
-      'productIds': FieldValue.arrayRemove([normalizedProductId]),
-    }, SetOptions(merge: true));
+    return RepositoryGuard.run(
+      message: 'Unable to update wishlist.',
+      action: () {
+        return _wishlistDoc(normalizedUserId).set({
+          FirestoreFields.productIds: FieldValue.arrayRemove([
+            normalizedProductId,
+          ]),
+        }, SetOptions(merge: true)).timeout(AppDurations.networkTimeout);
+      },
+    );
   }
 
   @override
@@ -78,5 +103,14 @@ class FirestoreWishlistRepository implements WishlistRepository {
     }
 
     return normalizedProductId;
+  }
+
+  static String _normalizeUserId(String userId) {
+    final normalizedUserId = userId.trim();
+    if (normalizedUserId.isEmpty) {
+      throw ArgumentError.value(userId, 'userId', 'Required');
+    }
+
+    return normalizedUserId;
   }
 }

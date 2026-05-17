@@ -5,6 +5,8 @@ class AppUser {
     this.email = '',
     this.phone = '',
     this.address = '',
+    this.addresses = const <String>[],
+    this.photoUrl = '',
     this.createdAt,
     this.updatedAt,
   });
@@ -14,6 +16,8 @@ class AppUser {
   final String email;
   final String phone;
   final String address;
+  final List<String> addresses;
+  final String photoUrl;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -24,12 +28,21 @@ class AppUser {
     return 'User';
   }
 
+  List<String> get savedAddresses {
+    if (addresses.isNotEmpty) return addresses;
+    final primaryAddress = address.trim();
+    if (primaryAddress.isEmpty) return const <String>[];
+    return <String>[primaryAddress];
+  }
+
   AppUser copyWith({
     String? uid,
     String? name,
     String? email,
     String? phone,
     String? address,
+    List<String>? addresses,
+    String? photoUrl,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -39,6 +52,8 @@ class AppUser {
       email: email ?? this.email,
       phone: phone ?? this.phone,
       address: address ?? this.address,
+      addresses: addresses ?? this.addresses,
+      photoUrl: photoUrl ?? this.photoUrl,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

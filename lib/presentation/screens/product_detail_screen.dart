@@ -5,6 +5,7 @@ import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/product.dart';
 import '../providers/auth_providers.dart';
 import '../providers/commerce_providers.dart';
+import '../widgets/app_cached_network_image.dart';
 
 class ProductDetailScreen extends ConsumerWidget {
   const ProductDetailScreen({
@@ -44,9 +45,16 @@ class ProductDetailScreen extends ConsumerWidget {
             height: 250,
             width: double.infinity,
             color: Colors.grey[200],
-            child: product.imageUrl.isNotEmpty
-                ? Image.network(product.imageUrl, fit: BoxFit.cover)
-                : const Icon(Icons.image, size: 100),
+            child: AppCachedNetworkImage(
+              imageUrl: product.imageUrl,
+              fit: BoxFit.cover,
+              memCacheWidth: ProductDetailConfig.imageCacheWidth,
+              maxWidthDiskCache: ProductDetailConfig.imageDiskCacheWidth,
+              placeholder: const _ProductDetailImagePlaceholder(),
+              errorPlaceholder: const _ProductDetailImagePlaceholder(
+                icon: Icons.image_not_supported,
+              ),
+            ),
           ),
           Expanded(
             child: Padding(
@@ -137,4 +145,25 @@ class ProductDetailScreen extends ConsumerWidget {
   String _formatPrice(double price) {
     return price % 1 == 0 ? price.toStringAsFixed(0) : price.toStringAsFixed(2);
   }
+}
+
+class _ProductDetailImagePlaceholder extends StatelessWidget {
+  const _ProductDetailImagePlaceholder({this.icon = Icons.image});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(color: Colors.grey.shade200),
+      child: Center(child: Icon(icon, size: 80)),
+    );
+  }
+}
+
+class ProductDetailConfig {
+  const ProductDetailConfig._();
+
+  static const imageCacheWidth = 900;
+  static const imageDiskCacheWidth = 1200;
 }

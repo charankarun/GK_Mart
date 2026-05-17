@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
+import '../../core/errors/app_error_handler.dart';
+import '../../core/notifications/notification_service.dart';
+import '../../core/theme/app_theme.dart';
+import '../../domain/entities/app_user.dart';
 import '../providers/admin_mode_provider.dart';
 import '../providers/auth_providers.dart';
 import '../providers/repository_providers.dart';
+import '../widgets/app_cached_network_image.dart';
+import '../widgets/customer_support_sheet.dart';
 import 'address_screen.dart';
 import 'admin/admin_category_screen.dart';
 import 'admin/admin_inventory_screen.dart';
@@ -11,6 +18,10 @@ import 'admin/admin_orders_screen.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import 'orders_screen.dart';
+
+final _signOutLoadingProvider = StateProvider.autoDispose<bool>((ref) {
+  return false;
+});
 
 class AccountPage extends ConsumerWidget {
   const AccountPage({super.key});
@@ -21,8 +32,8 @@ class AccountPage extends ConsumerWidget {
 
     if (session == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('My Account')),
-        body: const Center(child: Text('Please login to view your account')),
+        appBar: AppBar(title: const Text(AccountText.title)),
+        body: const Center(child: Text(AccountText.loginRequired)),
       );
     }
 
@@ -32,218 +43,584 @@ class AccountPage extends ConsumerWidget {
           orElse: () => false,
         );
     final adminMode = ref.watch(adminModeProvider);
+    final isSigningOut = ref.watch(_signOutLoadingProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('My Account')),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            Container(
-              margin: const EdgeInsets.all(12),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(15),
-                boxShadow: [
-                  BoxShadow(color: Colors.grey.shade200, blurRadius: 5),
-                ],
-              ),
-              child: Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 30,
-                    backgroundColor: Color(0xFF6C63FF),
-                    child: Icon(Icons.person, color: Colors.white, size: 30),
-                  ),
-                  const SizedBox(width: 15),
-                  Expanded(
-                    child: userAsync.when(
-                      data: (user) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              user?.displayName ?? 'User',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 5),
-                            Text(
-                              user?.email.isNotEmpty == true
-                                  ? user!.email
-                                  : session.email ?? session.phoneNumber ?? '',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        );
-                      },
-                      loading: () => const Text(
-                        'Loading...',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                      error: (_, __) => const Text('No data'),
-                    ),
-                  ),
-                ],
-              ),
+      appBar: AppBar(title: const Text(AccountText.title)),
+      body: ListView(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        children: [
+          userAsync.when(
+            data: (user) {
+              return _ProfileCard(
+                user: user,
+                fallbackEmail: session.email ?? '',
+                fallbackPhone: session.phoneNumber ?? '',
+              );
+            },
+            loading: () => const _LoadingCard(label: AccountText.loading),
+            error: (_, __) => const _LoadingCard(label: AccountText.noData),
+          ),
+          const SizedBox(height: 14),
+          userAsync.when(
+            data: (user) {
+              return _AddressSummaryCard(
+                addresses: user?.savedAddresses ?? const <String>[],
+                onTap: () => _openAddress(context),
+              );
+            },
+            loading: () => const _LoadingCard(label: AccountText.loading),
+            error: (_, __) => _AddressSummaryCard(
+              addresses: const <String>[],
+              onTap: () => _openAddress(context),
             ),
-            if (isAdmin)
-              _buildAdminModeToggle(
-                value: adminMode,
-                onChanged: (value) {
-                  ref.read(adminModeProvider.notifier).setEnabled(value);
-                },
-              ),
-            _buildOption(
-              icon: Icons.edit,
-              title: 'Edit Profile',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const EditProfileScreen()),
-                );
+          ),
+          if (isAdmin) ...[
+            const SizedBox(height: 14),
+            _AdminModeCard(
+              value: adminMode,
+              onChanged: (value) {
+                ref.read(adminModeProvider.notifier).setEnabled(value);
               },
             ),
-            _buildOption(
-              icon: Icons.shopping_bag,
-              title: 'My Orders',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const OrdersScreen()),
-                );
-              },
-            ),
-            _buildOption(
-              icon: Icons.location_on,
-              title: 'My Address',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AddressScreen()),
-                );
-              },
-            ),
-            _buildOption(
-              icon: Icons.support_agent,
-              title: 'Customer Support',
-              onTap: () {},
-            ),
-            _buildOption(
-              icon: Icons.lock_reset,
-              title: 'Reset Password',
+          ],
+          const SizedBox(height: 14),
+          _AccountOption(
+            icon: Icons.edit_outlined,
+            title: AccountText.editProfile,
+            subtitle: AccountText.editProfileSubtitle,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const EditProfileScreen()),
+              );
+            },
+          ),
+          _AccountOption(
+            icon: Icons.shopping_bag_outlined,
+            title: AccountText.myOrders,
+            subtitle: AccountText.myOrdersSubtitle,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const OrdersScreen()),
+              );
+            },
+          ),
+          _AccountOption(
+            icon: Icons.location_on_outlined,
+            title: AccountText.myAddress,
+            subtitle: AccountText.myAddressSubtitle,
+            onTap: () => _openAddress(context),
+          ),
+          _AccountOption(
+            icon: Icons.support_agent_rounded,
+            title: AccountText.customerSupport,
+            subtitle: CustomerSupportText.phone,
+            onTap: () => showCustomerSupportSheet(context),
+          ),
+          _AccountOption(
+            icon: Icons.lock_reset_rounded,
+            title: AccountText.resetPassword,
+            subtitle: AccountText.resetPasswordSubtitle,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const ChangePasswordScreen(),
+                ),
+              );
+            },
+          ),
+          if (isAdmin) ...[
+            const SizedBox(height: 8),
+            _SectionLabel(label: AccountText.adminTools),
+            _AccountOption(
+              icon: Icons.inventory_2_outlined,
+              title: AccountText.manageProducts,
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => const ChangePasswordScreen(),
+                    builder: (_) => const AdminInventoryScreen(),
                   ),
                 );
               },
             ),
-            if (isAdmin)
-              _buildOption(
-                icon: Icons.inventory_2,
-                title: 'Manage Products',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const AdminInventoryScreen(),
-                    ),
-                  );
-                },
+            _AccountOption(
+              icon: Icons.category_outlined,
+              title: AccountText.manageCategories,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const AdminCategoryScreen(),
+                  ),
+                );
+              },
+            ),
+            _AccountOption(
+              icon: Icons.admin_panel_settings_outlined,
+              title: AccountText.adminPanel,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const AdminOrdersScreen(),
+                  ),
+                );
+              },
+            ),
+          ],
+          const SizedBox(height: 18),
+          SizedBox(
+            height: 50,
+            child: OutlinedButton.icon(
+              onPressed: isSigningOut
+                  ? null
+                  : () => _signOut(
+                        context: context,
+                        ref: ref,
+                      ),
+              icon: isSigningOut
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.logout_rounded),
+              label: Text(
+                isSigningOut ? AccountText.signingOut : AccountText.signOut,
               ),
-            if (isAdmin)
-              _buildOption(
-                icon: Icons.category,
-                title: 'Manage Categories',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const AdminCategoryScreen(),
-                    ),
-                  );
-                },
-              ),
-            if (isAdmin)
-              _buildOption(
-                icon: Icons.admin_panel_settings,
-                title: 'Admin Panel',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const AdminOrdersScreen(),
-                    ),
-                  );
-                },
-              ),
-            const SizedBox(height: 20),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 50),
-                ),
-                onPressed: () async {
-                  ref.read(adminModeProvider.notifier).disable();
-                  await ref.read(authRepositoryProvider).signOut();
-                },
-                child: const Text('Sign out'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.accent,
+                side: const BorderSide(color: AppColors.accent),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openAddress(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddressScreen()),
+    );
+  }
+
+  Future<void> _signOut({
+    required BuildContext context,
+    required WidgetRef ref,
+  }) async {
+    final loadingNotifier = ref.read(_signOutLoadingProvider.notifier);
+    if (loadingNotifier.state) return;
+
+    loadingNotifier.state = true;
+    try {
+      ref.read(adminModeProvider.notifier).disable();
+      await NotificationService.instance.unregisterDeviceForUser(
+        ref.read(currentSessionProvider)?.uid ?? '',
+      );
+      await ref.read(authRepositoryProvider).signOut();
+    } catch (error) {
+      if (!context.mounted) return;
+
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: AccountText.signOutError,
+      );
+    } finally {
+      if (context.mounted) {
+        loadingNotifier.state = false;
+      }
+    }
+  }
+}
+
+class _ProfileCard extends StatelessWidget {
+  const _ProfileCard({
+    required this.user,
+    required this.fallbackEmail,
+    required this.fallbackPhone,
+  });
+
+  final AppUser? user;
+  final String fallbackEmail;
+  final String fallbackPhone;
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName = user?.displayName ?? AccountText.user;
+    final email = user?.email.trim().isNotEmpty == true
+        ? user!.email.trim()
+        : fallbackEmail;
+    final phone = user?.phone.trim().isNotEmpty == true
+        ? user!.phone.trim()
+        : fallbackPhone;
+
+    return _CardSurface(
+      child: Row(
+        children: [
+          _ProfileAvatar(imageUrl: user?.photoUrl ?? ''),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  email.isEmpty ? AccountText.noEmail : email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.mutedText,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (phone.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    phone,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.mutedText,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileAvatar extends StatelessWidget {
+  const _ProfileAvatar({required this.imageUrl});
+
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmedUrl = imageUrl.trim();
+
+    return ClipOval(
+      child: SizedBox(
+        width: 66,
+        height: 66,
+        child: AppCachedNetworkImage(
+          imageUrl: trimmedUrl,
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.medium,
+          memCacheWidth: AccountConfig.avatarImageCacheExtent,
+          memCacheHeight: AccountConfig.avatarImageCacheExtent,
+          maxWidthDiskCache: AccountConfig.avatarImageDiskCacheExtent,
+          maxHeightDiskCache: AccountConfig.avatarImageDiskCacheExtent,
+          placeholder: const _ProfileAvatarFallback(),
+          errorPlaceholder: const _ProfileAvatarFallback(),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileAvatarFallback extends StatelessWidget {
+  const _ProfileAvatarFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return const DecoratedBox(
+      decoration: BoxDecoration(color: AppColors.softGreen),
+      child: Icon(
+        Icons.person_rounded,
+        color: AppColors.primary,
+        size: 34,
+      ),
+    );
+  }
+}
+
+class _AddressSummaryCard extends StatelessWidget {
+  const _AddressSummaryCard({
+    required this.addresses,
+    required this.onTap,
+  });
+
+  final List<String> addresses;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleAddresses = addresses.where((address) {
+      return address.trim().isNotEmpty;
+    }).toList();
+    final primaryAddress =
+        visibleAddresses.isEmpty ? '' : visibleAddresses.first.trim();
+    final hasAddress = primaryAddress.isNotEmpty;
+
+    return _CardSurface(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        onTap: onTap,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: hasAddress ? AppColors.softGreen : AppColors.softOrange,
+                borderRadius: BorderRadius.circular(AppRadii.md),
+              ),
+              child: Icon(
+                Icons.location_on_rounded,
+                color: hasAddress ? AppColors.primary : AppColors.accent,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    AccountText.savedAddress,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    hasAddress ? primaryAddress : AccountText.noAddressSaved,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color:
+                          hasAddress ? AppColors.mutedText : AppColors.accent,
+                      height: 1.25,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (visibleAddresses.length > 1) ...[
+                    const SizedBox(height: 7),
+                    Text(
+                      '${visibleAddresses.length} ${AccountText.addressesSaved}',
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.mutedText),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildOption({
-    required IconData icon,
-    required String title,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-      ),
-      child: ListTile(
-        leading: Icon(icon, color: const Color(0xFF6C63FF)),
-        title: Text(title),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-        onTap: onTap,
-      ),
-    );
-  }
+class _AdminModeCard extends StatelessWidget {
+  const _AdminModeCard({
+    required this.value,
+    required this.onChanged,
+  });
 
-  Widget _buildAdminModeToggle({
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-      ),
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return _CardSurface(
+      padding: EdgeInsets.zero,
       child: SwitchListTile(
         secondary: const Icon(
-          Icons.admin_panel_settings,
-          color: Color(0xFF6C63FF),
+          Icons.admin_panel_settings_rounded,
+          color: AppColors.primary,
         ),
-        title: const Text('Admin Mode'),
+        title: const Text(
+          AccountText.adminMode,
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
         value: value,
         onChanged: onChanged,
       ),
     );
   }
+}
+
+class _AccountOption extends StatelessWidget {
+  const _AccountOption({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+    this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: _CardSurface(
+        padding: EdgeInsets.zero,
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: 4,
+          ),
+          leading: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.softGreen,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+            child: Icon(icon, color: AppColors.primary),
+          ),
+          title: Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.text,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          subtitle: subtitle == null
+              ? null
+              : Text(
+                  subtitle!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.mutedText,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: onTap,
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: AppColors.mutedText,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+class _LoadingCard extends StatelessWidget {
+  const _LoadingCard({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return _CardSurface(
+      child: SizedBox(
+        height: 54,
+        child: Center(child: Text(label)),
+      ),
+    );
+  }
+}
+
+class _CardSurface extends StatelessWidget {
+  const _CardSurface({
+    required this.child,
+    this.padding = const EdgeInsets.all(AppSpacing.lg),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        boxShadow: AppShadows.soft,
+      ),
+      child: child,
+    );
+  }
+}
+
+class AccountConfig {
+  const AccountConfig._();
+
+  static const avatarImageCacheExtent = 140;
+  static const avatarImageDiskCacheExtent = 180;
+}
+
+class AccountText {
+  const AccountText._();
+
+  static const title = 'My Account';
+  static const loginRequired = 'Please login to view your account';
+  static const loading = 'Loading...';
+  static const noData = 'No data';
+  static const user = 'User';
+  static const noEmail = 'No email added';
+  static const savedAddress = 'Saved Address';
+  static const noAddressSaved = 'Add your delivery address';
+  static const addressesSaved = 'addresses saved';
+  static const adminMode = 'Admin Mode';
+  static const editProfile = 'Edit Profile';
+  static const editProfileSubtitle = 'Name, email and profile picture';
+  static const myOrders = 'My Orders';
+  static const myOrdersSubtitle = 'Track status and order summaries';
+  static const myAddress = 'My Address';
+  static const myAddressSubtitle = 'Add or update delivery addresses';
+  static const customerSupport = 'Customer Support';
+  static const resetPassword = 'Reset Password';
+  static const resetPasswordSubtitle = 'For email-password accounts';
+  static const adminTools = 'Admin tools';
+  static const manageProducts = 'Manage Products';
+  static const manageCategories = 'Manage Categories';
+  static const adminPanel = 'Admin Panel';
+  static const signOut = 'Sign out';
+  static const signingOut = 'Signing out...';
+  static const signOutError = 'Unable to sign out';
 }

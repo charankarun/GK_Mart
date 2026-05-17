@@ -18,6 +18,7 @@ class AdminProductListController
   AdminProductListController(this._ref) : super(const AsyncLoading());
 
   final Ref _ref;
+  bool _isSavingProduct = false;
 
   Future<void> loadInitial() async {
     state = const AsyncLoading();
@@ -63,25 +64,43 @@ class AdminProductListController
   }
 
   Future<void> saveProduct(AdminProductInput input) async {
-    final imageUrl = await _resolveImageUrl(input);
-    final product = Product(
-      id: input.productId ?? '',
-      name: input.name,
-      categoryId: input.categoryId,
-      price: input.price,
-      discountPrice: input.discountPrice,
-      imageUrl: imageUrl,
-      isAvailable: input.isAvailable,
-    );
+    if (_isSavingProduct) return;
 
-    final repository = _ref.read(productRepositoryProvider);
-    if (input.isEditing) {
-      await repository.updateProduct(product);
-    } else {
-      await repository.addProduct(product);
+    _isSavingProduct = true;
+    final previousState = state;
+    state = const AsyncLoading();
+
+    try {
+      final imageUrl = await _resolveImageUrl(input);
+      final product = Product(
+        id: input.productId ?? '',
+        name: input.name,
+        categoryId: input.categoryId,
+        price: input.price,
+        discountPrice: input.discountPrice,
+        imageUrl: imageUrl,
+        isAvailable: input.isAvailable,
+        unit: input.unit,
+        stockQuantity: input.stockQuantity,
+        lowStockThreshold: input.lowStockThreshold,
+      );
+
+      final repository = _ref.read(productRepositoryProvider);
+      if (input.isEditing) {
+        await repository.updateProduct(product);
+      } else {
+        await repository.addProduct(product);
+      }
+
+      await loadInitial();
+    } catch (error, stackTrace) {
+      state = previousState.hasValue
+          ? previousState
+          : AsyncError(error, stackTrace);
+      rethrow;
+    } finally {
+      _isSavingProduct = false;
     }
-
-    await loadInitial();
   }
 
   Future<void> updateAvailability({
@@ -90,10 +109,18 @@ class AdminProductListController
   }) async {
     final currentState = _currentState;
     if (currentState == null) return;
+    if (currentState.pendingAvailabilityProductIds.contains(productId)) return;
 
-    final optimisticState = currentState.replaceProduct(
+    final optimisticState = currentState
+        .replaceProduct(
       productId,
       (product) => product.copyWith(isAvailable: isAvailable),
+    )
+        .copyWith(
+      pendingAvailabilityProductIds: {
+        ...currentState.pendingAvailabilityProductIds,
+        productId,
+      },
     );
     state = AsyncData(optimisticState);
 
@@ -102,6 +129,40 @@ class AdminProductListController
             productId: productId,
             isAvailable: isAvailable,
           );
+      final latestState = _currentState;
+      if (latestState == null) return;
+      state = AsyncData(
+        latestState.copyWith(
+          pendingAvailabilityProductIds: {
+            for (final pendingProductId
+                in latestState.pendingAvailabilityProductIds)
+              if (pendingProductId != productId) pendingProductId,
+          },
+        ),
+      );
+    } catch (_) {
+      state = AsyncData(currentState);
+      rethrow;
+    }
+  }
+
+  Future<void> deleteProduct(String productId) async {
+    final currentState = _currentState;
+    if (currentState == null) return;
+    if (currentState.pendingDeleteProductIds.contains(productId)) return;
+
+    state = AsyncData(
+      currentState.copyWith(
+        pendingDeleteProductIds: {
+          ...currentState.pendingDeleteProductIds,
+          productId,
+        },
+      ),
+    );
+
+    try {
+      await _ref.read(productRepositoryProvider).deleteProduct(productId);
+      await loadInitial();
     } catch (_) {
       state = AsyncData(currentState);
       rethrow;
@@ -142,12 +203,16 @@ class AdminProductListState {
     required this.hasMore,
     this.nextCursor,
     this.isLoadingMore = false,
+    this.pendingAvailabilityProductIds = const <String>{},
+    this.pendingDeleteProductIds = const <String>{},
   });
 
   final List<Product> products;
   final ProductPageCursor? nextCursor;
   final bool hasMore;
   final bool isLoadingMore;
+  final Set<String> pendingAvailabilityProductIds;
+  final Set<String> pendingDeleteProductIds;
 
   factory AdminProductListState.fromPage(ProductPage page) {
     return AdminProductListState(
@@ -162,12 +227,18 @@ class AdminProductListState {
     ProductPageCursor? nextCursor,
     bool? hasMore,
     bool? isLoadingMore,
+    Set<String>? pendingAvailabilityProductIds,
+    Set<String>? pendingDeleteProductIds,
   }) {
     return AdminProductListState(
       products: products ?? this.products,
       nextCursor: nextCursor ?? this.nextCursor,
       hasMore: hasMore ?? this.hasMore,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+      pendingAvailabilityProductIds:
+          pendingAvailabilityProductIds ?? this.pendingAvailabilityProductIds,
+      pendingDeleteProductIds:
+          pendingDeleteProductIds ?? this.pendingDeleteProductIds,
     );
   }
 
@@ -192,6 +263,10 @@ class AdminProductInput {
     required this.discountPrice,
     required this.existingImageUrl,
     required this.isAvailable,
+    required this.unit,
+    required this.trackStock,
+    required this.stockQuantity,
+    required this.lowStockThreshold,
     this.productId,
     this.imageBytes,
     this.imageFileName,
@@ -205,6 +280,10 @@ class AdminProductInput {
   final double discountPrice;
   final String existingImageUrl;
   final bool isAvailable;
+  final String unit;
+  final bool trackStock;
+  final int? stockQuantity;
+  final int lowStockThreshold;
   final Uint8List? imageBytes;
   final String? imageFileName;
   final String imageContentType;

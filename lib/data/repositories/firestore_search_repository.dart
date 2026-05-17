@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/constants/app_constants.dart';
+import '../../core/errors/repository_exception.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/repositories/search_repository.dart';
 import '../models/product_model.dart';
@@ -9,7 +11,7 @@ class FirestoreSearchRepository implements SearchRepository {
 
   final FirebaseFirestore _firestore;
 
-  static const _collectionPath = 'products';
+  static const _collectionPath = FirestoreCollections.products;
   static const _prefixSearchTerminator = '\uf8ff';
 
   CollectionReference<Map<String, dynamic>> get _products {
@@ -26,17 +28,27 @@ class FirestoreSearchRepository implements SearchRepository {
       return Stream.value(const <Product>[]);
     }
 
-    return _products
-        .where(ProductField.name, isGreaterThanOrEqualTo: normalizedQuery)
-        .where(
-          ProductField.name,
-          isLessThanOrEqualTo: '$normalizedQuery$_prefixSearchTerminator',
-        )
-        .orderBy(ProductField.name)
-        .limit(limit)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map(ProductModel.fromFirestore).toList();
-    });
+    final searchableQuery = normalizedQuery.toLowerCase();
+
+    return RepositoryGuard.watch(
+      message: 'Unable to load product suggestions.',
+      create: () {
+        return _products
+            .where(
+              ProductField.searchName,
+              isGreaterThanOrEqualTo: searchableQuery,
+            )
+            .where(
+              ProductField.searchName,
+              isLessThanOrEqualTo: '$searchableQuery$_prefixSearchTerminator',
+            )
+            .orderBy(ProductField.searchName)
+            .limit(limit)
+            .snapshots()
+            .map((snapshot) {
+          return snapshot.docs.map(ProductModel.fromFirestore).toList();
+        });
+      },
+    );
   }
 }

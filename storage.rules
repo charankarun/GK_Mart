@@ -1,0 +1,76 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function adminConfigExists() {
+      return firestore.exists(/databases/(default)/documents/admin_config/admins);
+    }
+
+    function adminData() {
+      return firestore.get(/databases/(default)/documents/admin_config/admins).data;
+    }
+
+    function adminEmailMatches() {
+      return request.auth.token.email is string
+        && (
+          request.auth.token.email in adminData().get('emails', [])
+          || request.auth.token.email in adminData().get('adminEmails', [])
+          || request.auth.token.email in adminData().get('admin_emails', [])
+        );
+    }
+
+    function adminPhoneMatches() {
+      return request.auth.token.phone_number is string
+        && (
+          request.auth.token.phone_number in adminData().get('phones', [])
+          || request.auth.token.phone_number in adminData().get('adminPhones', [])
+          || request.auth.token.phone_number in adminData().get('admin_phones', [])
+        );
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && adminConfigExists()
+        && (adminEmailMatches() || adminPhoneMatches());
+    }
+
+    function validImage(maxBytes) {
+      return request.resource != null
+        && request.resource.size > 0
+        && request.resource.size <= maxBytes
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
+    }
+
+    function isOwnerProfileImage(fileName) {
+      return signedIn()
+        && fileName.matches('^' + request.auth.uid + '_.*');
+    }
+
+    match /product_images/{fileName} {
+      allow read: if true;
+      allow create, update: if isAdmin() && validImage(1536 * 1024);
+      allow delete: if isAdmin();
+    }
+
+    match /category_images/{fileName} {
+      allow read: if true;
+      allow create, update: if isAdmin() && validImage(1024 * 1024);
+      allow delete: if isAdmin();
+    }
+
+    match /profile_images/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if isOwnerProfileImage(fileName)
+        && validImage(1024 * 1024);
+      allow delete: if isOwnerProfileImage(fileName);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

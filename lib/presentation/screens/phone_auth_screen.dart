@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/app_error_handler.dart';
 import '../providers/repository_providers.dart';
-
 
 class PhoneAuthScreen extends ConsumerStatefulWidget {
   const PhoneAuthScreen({
@@ -31,30 +31,41 @@ class _PhoneAuthScreenState extends ConsumerState<PhoneAuthScreen> {
 
     setState(() => isLoading = true);
 
-    await ref.read(phoneAuthRepositoryProvider).sendOtp(
-          phoneNumber: _e164Phone,
-          onCodeSent: (verId) {
-            if (!mounted) return;
+    try {
+      await ref.read(phoneAuthRepositoryProvider).sendOtp(
+            phoneNumber: _e164Phone,
+            onCodeSent: (verId) {
+              if (!mounted) return;
 
-            setState(() {
-              verificationId = verId;
-              otpSent = true;
-              isLoading = false;
-            });
-          },
-          onVerificationFailed: (message) {
-            if (!mounted) return;
+              setState(() {
+                verificationId = verId;
+                otpSent = true;
+                isLoading = false;
+              });
+            },
+            onVerificationFailed: (message) {
+              if (!mounted) return;
 
-            setState(() => isLoading = false);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(message)),
-            );
-          },
-          onAutoVerified: (_) async {
-            if (!mounted) return;
-            Navigator.pop(context);
-          },
-        );
+              setState(() => isLoading = false);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(message)),
+              );
+            },
+            onAutoVerified: (_) async {
+              if (!mounted) return;
+              Navigator.pop(context);
+            },
+          );
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() => isLoading = false);
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: 'Unable to send OTP',
+      );
+    }
   }
 
   Future<void> verifyOTP() async {
@@ -70,10 +81,13 @@ class _PhoneAuthScreenState extends ConsumerState<PhoneAuthScreen> {
           );
 
       if (mounted) Navigator.pop(context);
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid OTP')),
+
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: 'Invalid OTP',
       );
     } finally {
       if (mounted) setState(() => isLoading = false);

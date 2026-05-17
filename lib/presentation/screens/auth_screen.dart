@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/app_error_handler.dart';
 import '../providers/repository_providers.dart';
 import 'phone_auth_screen.dart';
 
@@ -79,14 +80,18 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       }
     } on FirebaseAuthException catch (e) {
       _showMessage(_authMessage(e));
-    } catch (_) {
-      _showMessage('Error occurred');
+    } catch (error) {
+      _showMessage(
+        AppErrorHandler.messageFor(error, fallback: 'Error occurred'),
+      );
     } finally {
       if (mounted) setState(() => isSubmitting = false);
     }
   }
 
   void _showMessage(String message) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
@@ -178,7 +183,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: () => openOtpLogin(fromForgotPassword: true),
+                      onPressed: isSubmitting
+                          ? null
+                          : () => openOtpLogin(fromForgotPassword: true),
                       child: const Text(
                         'Forgot password? Use mobile OTP',
                         style: TextStyle(
@@ -224,7 +231,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                   width: double.infinity,
                   height: 50,
                   child: OutlinedButton.icon(
-                    onPressed: () => openOtpLogin(),
+                    onPressed: isSubmitting ? null : () => openOtpLogin(),
                     icon: const Icon(Icons.phone, color: Color(0xFF6C63FF)),
                     label: const Text(
                       'Login with Phone',
@@ -243,11 +250,13 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 ),
                 Center(
                   child: TextButton(
-                    onPressed: () {
-                      setState(() {
-                        isLogin = !isLogin;
-                      });
-                    },
+                    onPressed: isSubmitting
+                        ? null
+                        : () {
+                            setState(() {
+                              isLogin = !isLogin;
+                            });
+                          },
                     child: Text(
                       isLogin
                           ? "Don't have an account? Sign Up"

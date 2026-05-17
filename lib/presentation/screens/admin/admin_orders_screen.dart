@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/errors/app_error_handler.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../domain/entities/order.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/order_providers.dart';
+import '../../widgets/app_state_widgets.dart';
 
 class AdminOrdersScreen extends ConsumerWidget {
   const AdminOrdersScreen({super.key});
@@ -42,22 +45,32 @@ class AdminOrdersScreen extends ConsumerWidget {
       );
     }
 
-    final ordersAsync = ref.watch(ordersStreamProvider);
+    final ordersAsync = ref.watch(adminOrderListProvider);
     final pendingStatusUpdates = ref.watch(orderStatusUpdateControllerProvider);
 
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(title: const Text('Admin Orders')),
       body: ordersAsync.when(
-        data: (orders) {
+        data: (state) {
+          final orders = state.orders;
           if (orders.isEmpty) {
-            return const Center(child: Text('No orders yet'));
+            return const _AdminOrdersEmptyState();
           }
 
           return ListView.separated(
-            padding: const EdgeInsets.all(12),
-            itemCount: orders.length,
+            padding: const EdgeInsets.all(16),
+            itemCount: orders.length + 1,
             separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
+              if (index >= orders.length) {
+                return _AdminOrderListFooter(
+                  isLoading: state.isLoadingMore,
+                  hasMore: state.hasMore,
+                  onLoadMore: () => _loadMore(context, ref),
+                );
+              }
+
               final order = orders[index];
               final effectiveStatus = pendingStatusUpdates[order.id] ??
                   OrderStatus.normalize(order.status);
@@ -75,12 +88,20 @@ class AdminOrdersScreen extends ConsumerWidget {
                           orderId: order.id,
                           status: status,
                         );
-                  } catch (_) {
+                    ref.read(adminOrderListProvider.notifier).loadInitial();
                     if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('Unable to update order status'),
+                        content: Text(AdminOrdersText.statusUpdateSuccess),
                       ),
+                    );
+                  } catch (error) {
+                    if (!context.mounted) return;
+
+                    AppErrorHandler.showErrorSnackBar(
+                      context,
+                      error,
+                      fallbackMessage: 'Unable to update order status',
                     );
                   }
                 },
@@ -88,8 +109,104 @@ class AdminOrdersScreen extends ConsumerWidget {
             },
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(child: Text(_errorMessage(error))),
+        loading: () => const AppLoadingState(),
+        error: (error, _) => AppRetryState(
+          icon: Icons.error_outline_rounded,
+          title: _errorMessage(error),
+          message: AppErrorHandler.messageFor(
+            error,
+            fallback: 'Please try again in a moment.',
+          ),
+          onRetry: () {
+            ref.read(adminOrderListProvider.notifier).loadInitial();
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadMore(BuildContext context, WidgetRef ref) async {
+    try {
+      await ref.read(adminOrderListProvider.notifier).loadNext();
+    } catch (error) {
+      if (!context.mounted) return;
+
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: 'Unable to load more orders',
+      );
+    }
+  }
+}
+
+class AdminOrdersText {
+  const AdminOrdersText._();
+
+  static const statusUpdateSuccess = 'Order status updated';
+}
+
+class _AdminOrdersEmptyState extends StatelessWidget {
+  const _AdminOrdersEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Text(
+          'No orders yet',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: AppColors.mutedText,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminOrderListFooter extends StatelessWidget {
+  const _AdminOrderListFooter({
+    required this.isLoading,
+    required this.hasMore,
+    required this.onLoadMore,
+  });
+
+  final bool isLoading;
+  final bool hasMore;
+  final VoidCallback onLoadMore;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 10),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (!hasMore) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 10),
+          child: Text(
+            'All loaded orders are visible',
+            style: TextStyle(
+              color: AppColors.mutedText,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Center(
+      child: OutlinedButton.icon(
+        onPressed: onLoadMore,
+        icon: const Icon(Icons.expand_more_rounded),
+        label: const Text('Load more'),
       ),
     );
   }
@@ -112,15 +229,15 @@ class _AdminOrderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final statusStyle = _OrderStatusStyle.resolve(effectiveStatus);
 
-    return Card(
-      margin: EdgeInsets.zero,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: Colors.grey.shade200),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.soft,
       ),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -128,11 +245,7 @@ class _AdminOrderCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: _OrderTextBlock(
-                    label: 'Order ID',
-                    value: order.id,
-                    monospaceValue: true,
-                  ),
+                  child: _OrderIdBlock(orderId: order.id),
                 ),
                 const SizedBox(width: 12),
                 _StatusChip(
@@ -142,62 +255,93 @@ class _AdminOrderCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 14),
-            _OrderTextBlock(
-              label: 'Customer',
-              value: order.customerDisplayName,
-            ),
-            const SizedBox(height: 10),
-            _OrderTextBlock(
-              label: 'Items',
-              value: _itemsSummary(order),
-            ),
-            const SizedBox(height: 10),
-            _OrderTextBlock(
-              label: 'Address',
-              value: order.address,
-              maxLines: 3,
-            ),
-            const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: _OrderTextBlock(
-                    label: 'Total',
-                    value: '\u20B9${_formatPrice(order.total)}',
-                    emphasizeValue: true,
-                  ),
+            const SizedBox(height: 16),
+            _InfoGrid(
+              entries: [
+                _InfoEntry(
+                  label: 'Customer name',
+                  value: order.customerDisplayName,
+                  icon: Icons.person_outline_rounded,
                 ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 190,
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey('status-${order.id}-$effectiveStatus'),
-                    initialValue: effectiveStatus,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Status',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: OrderStatus.values.map((status) {
-                      return DropdownMenuItem(
-                        value: status,
-                        child: Text(status),
-                      );
-                    }).toList(),
-                    onChanged: isUpdating
-                        ? null
-                        : (status) {
-                            if (status == null || status == effectiveStatus) {
-                              return;
-                            }
-                            onStatusChanged(status);
-                          },
-                  ),
+                _InfoEntry(
+                  label: 'Customer phone',
+                  value: _fallback(order.phone, 'Phone not available'),
+                  icon: Icons.phone_outlined,
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            _InfoBlock(
+              label: 'Delivery address',
+              value: _fallback(order.address, 'No delivery address added'),
+              icon: Icons.location_on_outlined,
+              maxLines: 4,
+            ),
+            const SizedBox(height: 12),
+            _InfoBlock(
+              label: 'Order summary',
+              value: _itemsSummary(order),
+              icon: Icons.shopping_bag_outlined,
+              maxLines: 3,
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 14),
+              child: Divider(height: 1, color: AppColors.border),
+            ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final useWideLayout = constraints.maxWidth >= 560;
+
+                final totalBlock = _InfoBlock(
+                  label: 'Total',
+                  value: '\u20B9${_formatPrice(order.total)}',
+                  icon: Icons.payments_outlined,
+                  emphasizeValue: true,
+                );
+                final dropdown = DropdownButtonFormField<String>(
+                  key: ValueKey('status-${order.id}-$effectiveStatus'),
+                  initialValue: effectiveStatus,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Update Order',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: OrderStatus.values.map((status) {
+                    return DropdownMenuItem(
+                      value: status,
+                      child: Text(status),
+                    );
+                  }).toList(),
+                  onChanged: isUpdating
+                      ? null
+                      : (status) {
+                          if (status == null || status == effectiveStatus) {
+                            return;
+                          }
+                          onStatusChanged(status);
+                        },
+                );
+
+                if (!useWideLayout) {
+                  return Column(
+                    children: [
+                      totalBlock,
+                      const SizedBox(height: 12),
+                      dropdown,
+                    ],
+                  );
+                }
+
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(child: totalBlock),
+                    const SizedBox(width: 12),
+                    SizedBox(width: 210, child: dropdown),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -223,51 +367,165 @@ class _AdminOrderCard extends StatelessWidget {
     return '${item.name} x $quantity';
   }
 
+  String _fallback(String value, String fallback) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? fallback : trimmed;
+  }
+
   String _formatPrice(double price) {
     return price % 1 == 0 ? price.toStringAsFixed(0) : price.toStringAsFixed(2);
   }
 }
 
-class _OrderTextBlock extends StatelessWidget {
-  const _OrderTextBlock({
+class _OrderIdBlock extends StatelessWidget {
+  const _OrderIdBlock({required this.orderId});
+
+  final String orderId;
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleId = orderId.trim().isEmpty ? 'Unknown order' : orderId.trim();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.softGreen,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Order ID',
+            style: TextStyle(
+              color: AppColors.primary,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            visibleId,
+            maxLines: 2,
+            style: const TextStyle(
+              color: AppColors.text,
+              fontFamily: 'monospace',
+              fontSize: 13,
+              height: 1.2,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoGrid extends StatelessWidget {
+  const _InfoGrid({required this.entries});
+
+  final List<_InfoEntry> entries;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useTwoColumns = constraints.maxWidth >= 520;
+        final itemWidth = useTwoColumns
+            ? (constraints.maxWidth - 12) / 2
+            : constraints.maxWidth;
+
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final entry in entries)
+              SizedBox(
+                width: itemWidth,
+                child: _InfoBlock(
+                  label: entry.label,
+                  value: entry.value,
+                  icon: entry.icon,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _InfoEntry {
+  const _InfoEntry({
     required this.label,
     required this.value,
-    this.maxLines = 2,
-    this.emphasizeValue = false,
-    this.monospaceValue = false,
+    required this.icon,
   });
 
   final String label;
   final String value;
+  final IconData icon;
+}
+
+class _InfoBlock extends StatelessWidget {
+  const _InfoBlock({
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.maxLines = 2,
+    this.emphasizeValue = false,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
   final int maxLines;
   final bool emphasizeValue;
-  final bool monospaceValue;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.labelMedium?.copyWith(
-            color: Colors.grey.shade600,
-            fontWeight: FontWeight.w600,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: AppColors.primary, size: 19),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: AppColors.mutedText,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  maxLines: maxLines,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.text,
+                    height: 1.25,
+                    fontWeight:
+                        emphasizeValue ? FontWeight.w900 : FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          value,
-          maxLines: maxLines,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            fontFamily: monospaceValue ? 'monospace' : null,
-            fontWeight: emphasizeValue ? FontWeight.bold : FontWeight.w500,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -333,8 +591,8 @@ class _OrderStatusStyle {
     switch (OrderStatus.normalize(status)) {
       case OrderStatus.placed:
         return _OrderStatusStyle(
-          foreground: Colors.orange.shade800,
-          background: Colors.orange.shade50,
+          foreground: AppColors.accent,
+          background: AppColors.softOrange,
         );
       case OrderStatus.packed:
         return _OrderStatusStyle(
@@ -348,8 +606,8 @@ class _OrderStatusStyle {
         );
       case OrderStatus.delivered:
         return _OrderStatusStyle(
-          foreground: Colors.green.shade800,
-          background: Colors.green.shade50,
+          foreground: AppColors.primary,
+          background: AppColors.softGreen,
         );
     }
 
