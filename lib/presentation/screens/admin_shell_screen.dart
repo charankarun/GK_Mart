@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../widgets/app_bottom_nav_icon.dart';
 import 'admin/admin_category_screen.dart';
 import 'admin/admin_dashboard_screen.dart';
 import 'admin/admin_inventory_screen.dart';
@@ -52,23 +53,58 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
           onTap: onItemTapped,
           items: const [
             BottomNavigationBarItem(
-              icon: Icon(Icons.dashboard_rounded),
+              icon: AppBottomNavIcon(
+                icon: Icons.dashboard_rounded,
+                selected: false,
+              ),
+              activeIcon: AppBottomNavIcon(
+                icon: Icons.dashboard_rounded,
+                selected: true,
+              ),
               label: 'Dashboard',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.receipt_long_rounded),
+              icon: AppBottomNavIcon(
+                icon: Icons.receipt_long_rounded,
+                selected: false,
+              ),
+              activeIcon: AppBottomNavIcon(
+                icon: Icons.receipt_long_rounded,
+                selected: true,
+              ),
               label: 'Orders',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.inventory_2_rounded),
+              icon: AppBottomNavIcon(
+                icon: Icons.inventory_2_rounded,
+                selected: false,
+              ),
+              activeIcon: AppBottomNavIcon(
+                icon: Icons.inventory_2_rounded,
+                selected: true,
+              ),
               label: 'Inventory',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.category_rounded),
+              icon: AppBottomNavIcon(
+                icon: Icons.category_rounded,
+                selected: false,
+              ),
+              activeIcon: AppBottomNavIcon(
+                icon: Icons.category_rounded,
+                selected: true,
+              ),
               label: 'Categories',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline_rounded),
+              icon: AppBottomNavIcon(
+                icon: Icons.person_outline_rounded,
+                selected: false,
+              ),
+              activeIcon: AppBottomNavIcon(
+                icon: Icons.person_rounded,
+                selected: true,
+              ),
               label: 'Account',
             ),
           ],

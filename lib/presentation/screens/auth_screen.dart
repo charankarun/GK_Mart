@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/app_error_handler.dart';
+import '../../core/theme/app_theme.dart';
 import '../providers/repository_providers.dart';
 import 'phone_auth_screen.dart';
 
@@ -81,6 +82,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     } on FirebaseAuthException catch (e) {
       _showMessage(_authMessage(e));
     } catch (error) {
+      if (AppErrorHandler.isPermissionDenied(error)) return;
       _showMessage(
         AppErrorHandler.messageFor(error, fallback: 'Error occurred'),
       );
@@ -122,19 +124,15 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     String hint,
     IconData icon, {
     bool isPassword = false,
+    TextInputType? keyboardType,
   }) {
     return TextField(
       controller: controller,
       obscureText: isPassword,
+      keyboardType: keyboardType,
       decoration: InputDecoration(
-        hintText: hint,
+        labelText: hint,
         prefixIcon: Icon(icon),
-        filled: true,
-        fillColor: Colors.grey[100],
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
       ),
     );
   }
@@ -142,41 +140,66 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 40),
-                const Text(
-                  'GK Mart',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF6C63FF),
-                  ),
-                ),
-                const SizedBox(height: 10),
+                const _AuthBrandHeader(),
+                const SizedBox(height: 30),
                 Text(
                   isLogin ? 'Welcome back' : 'Create your account',
-                  style: const TextStyle(fontSize: 16, color: Colors.grey),
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontSize: 26,
+                    height: 1.08,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0,
+                  ),
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 8),
+                Text(
+                  isLogin
+                      ? 'Fresh groceries are waiting for you.'
+                      : 'Join GK Mart for faster checkout and easy orders.',
+                  style: const TextStyle(
+                    color: AppColors.mutedText,
+                    fontSize: 15,
+                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 28),
                 if (!isLogin)
-                  _buildTextField(nameController, 'Full Name', Icons.person),
-                if (!isLogin) const SizedBox(height: 15),
+                  _buildTextField(
+                    nameController,
+                    'Full Name',
+                    Icons.person_outline_rounded,
+                  ),
+                if (!isLogin) const SizedBox(height: 14),
                 if (!isLogin)
-                  _buildTextField(phoneController, 'Phone', Icons.phone),
-                if (!isLogin) const SizedBox(height: 15),
-                _buildTextField(emailController, 'Email', Icons.email),
-                const SizedBox(height: 15),
+                  _buildTextField(
+                    phoneController,
+                    'Phone',
+                    Icons.phone_outlined,
+                    keyboardType: TextInputType.phone,
+                  ),
+                if (!isLogin) const SizedBox(height: 14),
+                _buildTextField(
+                  emailController,
+                  'Email',
+                  Icons.mail_outline_rounded,
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 14),
                 _buildTextField(
                   passwordController,
                   'Password',
-                  Icons.lock,
+                  Icons.lock_outline_rounded,
                   isPassword: true,
                 ),
                 if (isLogin)
@@ -189,65 +212,62 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       child: const Text(
                         'Forgot password? Use mobile OTP',
                         style: TextStyle(
-                          color: Color(0xFF6C63FF),
-                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
                   ),
-                const SizedBox(height: 30),
+                const SizedBox(height: 22),
                 SizedBox(
                   width: double.infinity,
-                  height: 50,
+                  height: 52,
                   child: ElevatedButton(
                     onPressed: isSubmitting ? null : submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF6C63FF),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
                     child: isSubmitting
-                        ? const CircularProgressIndicator(color: Colors.white)
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.4,
+                              color: Colors.white,
+                            ),
+                          )
                         : Text(
                             isLogin ? 'Login' : 'Sign Up',
                             style: const TextStyle(fontSize: 16),
                           ),
                   ),
                 ),
-                const SizedBox(height: 20),
-                const Row(
+                const SizedBox(height: 18),
+                Row(
                   children: [
-                    Expanded(child: Divider()),
-                    Padding(
+                    const Expanded(child: Divider(color: AppColors.border)),
+                    const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 10),
-                      child: Text('OR'),
+                      child: Text(
+                        'OR',
+                        style: TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
                     ),
-                    Expanded(child: Divider()),
+                    const Expanded(child: Divider(color: AppColors.border)),
                   ],
                 ),
-                const SizedBox(height: 15),
+                const SizedBox(height: 14),
                 SizedBox(
                   width: double.infinity,
-                  height: 50,
+                  height: 52,
                   child: OutlinedButton.icon(
                     onPressed: isSubmitting ? null : () => openOtpLogin(),
-                    icon: const Icon(Icons.phone, color: Color(0xFF6C63FF)),
-                    label: const Text(
-                      'Login with Phone',
-                      style: TextStyle(
-                        color: Color(0xFF6C63FF),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0xFF6C63FF)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
+                    icon: const Icon(Icons.phone_iphone_rounded),
+                    label: const Text('Login with Phone'),
                   ),
                 ),
+                const SizedBox(height: 8),
                 Center(
                   child: TextButton(
                     onPressed: isSubmitting
@@ -269,6 +289,70 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AuthBrandHeader extends StatelessWidget {
+  const _AuthBrandHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: AppColors.primary,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            boxShadow: AppShadows.soft,
+          ),
+          child: const Icon(
+            Icons.shopping_basket_rounded,
+            color: Colors.white,
+            size: 27,
+          ),
+        ),
+        const SizedBox(width: 12),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: 'GK ',
+                      style: TextStyle(color: AppColors.primary),
+                    ),
+                    TextSpan(
+                      text: 'MART',
+                      style: TextStyle(color: AppColors.accent),
+                    ),
+                  ],
+                ),
+                style: TextStyle(
+                  fontSize: 24,
+                  height: 1,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Supermarket',
+                style: TextStyle(
+                  color: AppColors.mutedText,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

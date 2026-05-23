@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/app_error_handler.dart';
+import '../../core/theme/app_theme.dart';
 import '../providers/auth_providers.dart';
 import '../providers/repository_providers.dart';
 
@@ -127,7 +128,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
       obscureText: obscureText,
       decoration: InputDecoration(
         labelText: label,
-        prefixIcon: const Icon(Icons.lock),
+        prefixIcon: const Icon(Icons.lock_outline_rounded),
         suffixIcon: IconButton(
           icon: Icon(obscureText ? Icons.visibility : Icons.visibility_off),
           onPressed: onToggle,
@@ -145,24 +146,67 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
     final hasEmailPassword = session?.email?.isNotEmpty == true;
 
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(title: const Text('Reset Password')),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.all(AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (!hasEmailPassword)
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(AppSpacing.lg),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
+                  color: AppColors.card,
+                  borderRadius: BorderRadius.circular(AppRadii.lg),
+                  border: Border.all(color: AppColors.border),
+                  boxShadow: AppShadows.soft,
                 ),
-                child: const Text(
-                  'This account uses mobile OTP. There is no email password to reset.',
+                child: const Row(
+                  children: [
+                    Icon(Icons.phone_iphone_rounded, color: AppColors.primary),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'This account uses mobile OTP. There is no email password to reset.',
+                        style: TextStyle(
+                          color: AppColors.text,
+                          height: 1.35,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               )
             else ...[
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                decoration: BoxDecoration(
+                  color: AppColors.card,
+                  borderRadius: BorderRadius.circular(AppRadii.lg),
+                  border: Border.all(color: AppColors.border),
+                  boxShadow: AppShadows.soft,
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.lock_reset_rounded, color: AppColors.primary),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Use your current password to set a new secure password.',
+                        style: TextStyle(
+                          color: AppColors.mutedText,
+                          height: 1.35,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
               _passwordField(
                 controller: currentPasswordController,
                 label: 'Current Password',
@@ -192,7 +236,10 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
               const SizedBox(height: 10),
               const Text(
                 'If you forgot your password, login using mobile OTP from the login screen.',
-                style: TextStyle(color: Colors.grey),
+                style: TextStyle(
+                  color: AppColors.mutedText,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 20),
               ElevatedButton(
@@ -201,7 +248,14 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
                   minimumSize: const Size(double.infinity, 50),
                 ),
                 child: isLoading
-                    ? const CircularProgressIndicator(color: Colors.white)
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          color: Colors.white,
+                        ),
+                      )
                     : const Text('Update Password'),
               ),
             ],

@@ -180,6 +180,8 @@ class _AddressScreenState extends ConsumerState<AddressScreen> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _isSaving = false);
+      if (AppErrorHandler.isPermissionDenied(error)) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(_saveErrorMessage(error))),
       );
@@ -188,9 +190,6 @@ class _AddressScreenState extends ConsumerState<AddressScreen> {
 
   String _saveErrorMessage(Object error) {
     final message = error.toString().toLowerCase();
-    if (message.contains('permission-denied')) {
-      return AddressText.permissionError;
-    }
     if (message.contains('unavailable') || message.contains('network')) {
       return AddressText.networkError;
     }
@@ -783,8 +782,6 @@ class AddressText {
   static const addSuccess = 'Address added';
   static const updateSuccess = 'Address updated';
   static const saveError = 'Unable to save address';
-  static const permissionError =
-      'Address save is not allowed. Check Firestore rules.';
   static const networkError = 'Network issue while saving address. Try again.';
   static const requiredField = 'Required';
   static const shortAddress = 'Enter a more complete address';

@@ -67,7 +67,7 @@ class RepositoryGuard {
   static String? _firebaseMessage(FirebaseException error) {
     switch (error.code) {
       case 'permission-denied':
-        return "You don't have permission to perform this action.";
+        return null;
       case 'unavailable':
       case 'network-request-failed':
         return 'Network issue. Please check your connection and try again.';
@@ -81,7 +81,6 @@ class RepositoryGuard {
         return 'Please login and try again.';
     }
 
-    final message = error.message?.trim();
-    return message == null || message.isEmpty ? null : message;
+    return null;
   }
 }

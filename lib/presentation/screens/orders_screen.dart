@@ -634,10 +634,10 @@ String _formatDate(DateTime date) {
 class OrdersColors {
   const OrdersColors._();
 
-  static const placed = Color(0xFFB45309);
-  static const packed = Color(0xFF2563EB);
-  static const outForDelivery = Color(0xFF7C3AED);
-  static const delivered = Color(0xFF15803D);
+  static const placed = AppColors.warning;
+  static const packed = AppColors.info;
+  static const outForDelivery = AppColors.accent;
+  static const delivered = AppColors.success;
 }
 
 class OrdersConfig {

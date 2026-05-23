@@ -40,12 +40,12 @@ class AppCachedNetworkImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final trimmedUrl = imageUrl.trim();
-    final loading = placeholder ?? const AppImagePlaceholder();
+    final loading = placeholder ?? const AppImagePlaceholder(isLoading: true);
     final error = errorPlaceholder ??
-        const AppImagePlaceholder(icon: Icons.image_not_supported_outlined);
+        const AppImagePlaceholder(icon: Icons.local_grocery_store_rounded);
 
     Widget child;
-    if (trimmedUrl.isEmpty) {
+    if (!_isUsableImageUrl(trimmedUrl)) {
       child = error;
     } else {
       child = CachedNetworkImage(
@@ -78,6 +78,16 @@ class AppCachedNetworkImage extends StatelessWidget {
       child: child,
     );
   }
+
+  static bool _isUsableImageUrl(String value) {
+    if (value.isEmpty) return false;
+
+    final uri = Uri.tryParse(value);
+    if (uri == null || uri.host.isEmpty) return false;
+
+    final scheme = uri.scheme.toLowerCase();
+    return scheme == 'http' || scheme == 'https';
+  }
 }
 
 class AppImagePlaceholder extends StatelessWidget {
@@ -87,19 +97,30 @@ class AppImagePlaceholder extends StatelessWidget {
     this.iconSize = 32,
     this.backgroundColor = AppColors.softGreen,
     this.iconColor = AppColors.primary,
+    this.isLoading = false,
   });
 
   final IconData icon;
   final double iconSize;
   final Color backgroundColor;
   final Color iconColor;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(color: backgroundColor),
       child: Center(
-        child: Icon(icon, color: iconColor, size: iconSize),
+        child: isLoading
+            ? SizedBox(
+                width: iconSize,
+                height: iconSize,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: iconColor,
+                ),
+              )
+            : Icon(icon, color: iconColor, size: iconSize),
       ),
     );
   }

@@ -1,4 +1,3 @@
-
 name: supermarket_app
 description: A basic supermarket Flutter app
 publish_to: 'none'
@@ -34,20 +33,11 @@ flutter:
   assets:
     - assets/SLV_super_market.png
 
-# 🔥 SPLASH SCREEN CONFIG
-flutter_native_splash:
-  color: "#ffffff"
+# Native splash branding is disabled. The in-app SplashScreen is the single
+# branded startup experience.
 
-  android_12:
-    image: assets/SLV_super_market.png
-    icon_background_color: "#ffffff"
-    image_dark: assets/SLV_super_market.png
-
-  android: true
-  ios: true
-
-# 🔥 APP ICON CONFIG
+# APP ICON CONFIG
 flutter_icons:
   android: true
   ios: true
-  image_path: "assets/SLV_super_market.png"
+  image_path: "assets/gk_mart_app_icon_1024.png"

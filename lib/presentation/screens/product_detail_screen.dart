@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/product.dart';
 import '../providers/auth_providers.dart';
@@ -44,16 +45,16 @@ class ProductDetailScreen extends ConsumerWidget {
           Container(
             height: 250,
             width: double.infinity,
-            color: Colors.grey[200],
+            color: AppColors.softGreen,
             child: AppCachedNetworkImage(
               imageUrl: product.imageUrl,
               fit: BoxFit.cover,
               memCacheWidth: ProductDetailConfig.imageCacheWidth,
               maxWidthDiskCache: ProductDetailConfig.imageDiskCacheWidth,
-              placeholder: const _ProductDetailImagePlaceholder(),
-              errorPlaceholder: const _ProductDetailImagePlaceholder(
-                icon: Icons.image_not_supported,
+              placeholder: const _ProductDetailImagePlaceholder(
+                isLoading: true,
               ),
+              errorPlaceholder: const _ProductDetailImagePlaceholder(),
             ),
           ),
           Expanded(
@@ -74,7 +75,7 @@ class ProductDetailScreen extends ConsumerWidget {
                     '\u20B9${_formatPrice(product.sellingPrice)}',
                     style: const TextStyle(
                       fontSize: 18,
-                      color: Color(0xFF6C63FF),
+                      color: AppColors.primary,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -119,7 +120,7 @@ class ProductDetailScreen extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6C63FF),
+                backgroundColor: AppColors.primary,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               onPressed: !product.isAvailable
@@ -148,15 +149,60 @@ class ProductDetailScreen extends ConsumerWidget {
 }
 
 class _ProductDetailImagePlaceholder extends StatelessWidget {
-  const _ProductDetailImagePlaceholder({this.icon = Icons.image});
+  const _ProductDetailImagePlaceholder({this.isLoading = false});
 
-  final IconData icon;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: BoxDecoration(color: Colors.grey.shade200),
-      child: Center(child: Icon(icon, size: 80)),
+      decoration: const BoxDecoration(
+        color: AppColors.softGreen,
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                border: Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.12),
+                ),
+              ),
+              child: Icon(
+                isLoading
+                    ? Icons.local_grocery_store_rounded
+                    : Icons.image_outlined,
+                color: AppColors.primary,
+                size: 34,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (isLoading)
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: AppColors.primary,
+                ),
+              )
+            else
+              const Text(
+                'Image coming soon',
+                style: TextStyle(
+                  color: AppColors.mutedText,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0,
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

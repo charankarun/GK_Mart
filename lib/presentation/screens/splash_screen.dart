@@ -8,7 +8,14 @@ import '../../core/theme/app_theme.dart';
 import '../../main.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({
+    super.key,
+    required this.startup,
+    required this.onRetry,
+  });
+
+  final Future<void> startup;
+  final VoidCallback onRetry;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -17,9 +24,13 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  late final Animation<double> _logoFade;
-  late final Animation<double> _logoScale;
-  late final Animation<double> _taglineFade;
+  late final Animation<double> _fade;
+  late final Animation<double> _markScale;
+  late final Animation<Offset> _slide;
+
+  Object? _startupError;
+  bool _isLoading = true;
+  int _startupAttempt = 0;
 
   @override
   void initState() {
@@ -27,33 +38,75 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 2),
+      duration: const Duration(milliseconds: 1400),
     );
-    _logoFade = CurvedAnimation(
+    _fade = CurvedAnimation(
       parent: _controller,
-      curve: const Interval(0, 0.72, curve: Curves.easeOutCubic),
+      curve: const Interval(0, 0.82, curve: Curves.easeOutCubic),
     );
-    _logoScale = Tween<double>(begin: 0.9, end: 1).animate(
+    _markScale = Tween<double>(begin: 0.94, end: 1).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0, 0.82, curve: Curves.easeOutBack),
+        curve: const Interval(0, 0.78, curve: Curves.easeOutBack),
       ),
     );
-    _taglineFade = CurvedAnimation(
-      parent: _controller,
-      curve: const Interval(0.36, 1, curve: Curves.easeOutCubic),
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.08),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.12, 1, curve: Curves.easeOutCubic),
+      ),
     );
 
     _controller.forward();
+    unawaited(_beginStartup());
+  }
 
-    Timer(AppDurations.splashMinimumDuration, () {
-      if (!mounted) return;
+  @override
+  void didUpdateWidget(covariant SplashScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.startup != widget.startup) {
+      unawaited(_beginStartup());
+    }
+  }
+
+  Future<void> _beginStartup() async {
+    final attempt = ++_startupAttempt;
+    setState(() {
+      _isLoading = true;
+      _startupError = null;
+    });
+
+    try {
+      await Future.wait<void>([
+        widget.startup,
+        Future<void>.delayed(AppDurations.splashMinimumDuration),
+      ]);
+
+      if (!mounted || attempt != _startupAttempt) return;
 
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const AuthWrapper()),
       );
+    } catch (error) {
+      if (!mounted || attempt != _startupAttempt) return;
+
+      setState(() {
+        _isLoading = false;
+        _startupError = error;
+      });
+    }
+  }
+
+  void _retryStartup() {
+    setState(() {
+      _isLoading = true;
+      _startupError = null;
     });
+    widget.onRetry();
   }
 
   @override
@@ -64,528 +117,228 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final logoWidth = math.min(size.width * 0.76, 320.0);
+    final mediaPadding = MediaQuery.paddingOf(context);
 
     return Scaffold(
       backgroundColor: SplashColors.background,
       body: SafeArea(
         bottom: false,
-        child: Stack(
-          children: [
-            const _SubtleGroceryPattern(),
-            Column(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compactHeight = constraints.maxHeight < 620;
+            final horizontalPadding = constraints.maxWidth < 360 ? 20.0 : 28.0;
+            final availableWidth =
+                math.max(0.0, constraints.maxWidth - horizontalPadding * 2);
+            final maxContentWidth = math.min(availableWidth, 420.0);
+            final markSize = compactHeight ? 88.0 : 104.0;
+
+            return Stack(
               children: [
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 28, 24, 10),
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          FadeTransition(
-                            opacity: _logoFade,
-                            child: ScaleTransition(
-                              scale: _logoScale,
-                              child: _GkMartLogo(width: logoWidth),
+                const Positioned.fill(
+                  child: CustomPaint(painter: _SplashBackgroundPainter()),
+                ),
+                Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    compactHeight ? 18 : 28,
+                    horizontalPadding,
+                    24 + mediaPadding.bottom,
+                  ),
+                  child: Center(
+                    child: SingleChildScrollView(
+                      physics: const ClampingScrollPhysics(),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: maxContentWidth,
+                        ),
+                        child: FadeTransition(
+                          opacity: _fade,
+                          child: SlideTransition(
+                            position: _slide,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ScaleTransition(
+                                  scale: _markScale,
+                                  child: _BrandMark(size: markSize),
+                                ),
+                                SizedBox(height: compactHeight ? 18 : 24),
+                                const _Wordmark(),
+                                const SizedBox(height: 10),
+                                const _SplashTagline(),
+                                SizedBox(height: compactHeight ? 18 : 26),
+                                const _DeliveryPill(),
+                                SizedBox(height: compactHeight ? 22 : 34),
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 220),
+                                  child: _startupError == null
+                                      ? _LoadingStatus(isLoading: _isLoading)
+                                      : _StartupRetry(
+                                          onRetry: _retryStartup,
+                                        ),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 18),
-                          FadeTransition(
-                            opacity: _taglineFade,
-                            child: const _Tagline(),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-                const _BottomGroceryShowcase(),
               ],
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
   }
 }
 
-class _GkMartLogo extends StatelessWidget {
-  const _GkMartLogo({required this.width});
+class _BrandMark extends StatelessWidget {
+  const _BrandMark({required this.size});
 
-  final double width;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              SizedBox(
-                width: width * 0.22,
-                height: width * 0.2,
-                child: const CustomPaint(painter: _CartLogoPainter()),
-              ),
-              SizedBox(width: width * 0.02),
-              Text(
-                'GK',
-                style: TextStyle(
-                  color: AppColors.primary,
-                  fontSize: width * 0.22,
-                  height: 0.9,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0,
-                ),
-              ),
-              SizedBox(width: width * 0.03),
-              Text(
-                'MART',
-                style: TextStyle(
-                  color: AppColors.accent,
-                  fontSize: width * 0.118,
-                  height: 0.95,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const _LogoRule(),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Text(
-                  'SUPERMARKET',
-                  style: TextStyle(
-                    color: SplashColors.deepGreen,
-                    fontSize: width * 0.052,
-                    height: 1,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 3,
-                  ),
-                ),
-              ),
-              const _LogoRule(),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LogoRule extends StatelessWidget {
-  const _LogoRule();
+  final double size;
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox(
-      width: 42,
-      child: Divider(
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
         color: AppColors.primary,
-        thickness: 1.7,
-        height: 1,
-      ),
-    );
-  }
-}
-
-class _CartLogoPainter extends CustomPainter {
-  const _CartLogoPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = AppColors.primary
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = size.width * 0.075
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final cart = Path()
-      ..moveTo(size.width * 0.12, size.height * 0.12)
-      ..quadraticBezierTo(
-        size.width * 0.08,
-        size.height * 0.38,
-        size.width * 0.12,
-        size.height * 0.62,
-      )
-      ..lineTo(size.width * 0.78, size.height * 0.62)
-      ..quadraticBezierTo(
-        size.width * 0.92,
-        size.height * 0.6,
-        size.width * 0.94,
-        size.height * 0.45,
-      );
-
-    canvas.drawPath(cart, paint);
-    canvas.drawLine(
-      Offset(size.width * 0.14, size.height * 0.78),
-      Offset(size.width * 0.78, size.height * 0.78),
-      paint,
-    );
-
-    final wheelPaint = Paint()
-      ..color = AppColors.primary
-      ..style = PaintingStyle.fill;
-    canvas
-      ..drawCircle(
-        Offset(size.width * 0.28, size.height * 0.93),
-        size.width * 0.085,
-        wheelPaint,
-      )
-      ..drawCircle(
-        Offset(size.width * 0.76, size.height * 0.93),
-        size.width * 0.085,
-        wheelPaint,
-      );
-
-    final leafPaint = Paint()
-      ..color = AppColors.primary
-      ..style = PaintingStyle.fill;
-    final leaf = Path()
-      ..moveTo(size.width * 0.74, size.height * 0.1)
-      ..cubicTo(
-        size.width * 0.92,
-        size.height * -0.02,
-        size.width * 1.05,
-        size.height * 0.1,
-        size.width * 0.94,
-        size.height * 0.29,
-      )
-      ..cubicTo(
-        size.width * 0.83,
-        size.height * 0.23,
-        size.width * 0.77,
-        size.height * 0.19,
-        size.width * 0.74,
-        size.height * 0.1,
-      );
-    canvas.drawPath(leaf, leafPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _Tagline extends StatelessWidget {
-  const _Tagline();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Text.rich(
-      TextSpan(
-        children: [
-          TextSpan(
-            text: 'Smart Shopping',
-            style: TextStyle(color: AppColors.primary),
-          ),
-          TextSpan(
-            text: ', ',
-            style: TextStyle(color: AppColors.primary),
-          ),
-          TextSpan(
-            text: 'Better Living',
-            style: TextStyle(color: AppColors.accent),
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.24),
+            blurRadius: 28,
+            offset: const Offset(0, 14),
           ),
         ],
       ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Text(
+            'GK',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: size * 0.42,
+              height: 1,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0,
+            ),
+          ),
+          Positioned(
+            top: size * 0.16,
+            right: size * 0.16,
+            child: Container(
+              width: size * 0.25,
+              height: size * 0.25,
+              decoration: BoxDecoration(
+                color: AppColors.accent,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Icon(
+                Icons.eco_rounded,
+                color: Colors.white,
+                size: size * 0.15,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Wordmark extends StatelessWidget {
+  const _Wordmark();
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text.rich(
+        const TextSpan(
+          children: [
+            TextSpan(
+              text: 'GK ',
+              style: TextStyle(color: AppColors.primary),
+            ),
+            TextSpan(
+              text: 'MART',
+              style: TextStyle(color: AppColors.accent),
+            ),
+          ],
+        ),
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 44,
+          height: 1,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0,
+        ),
+      ),
+    );
+  }
+}
+
+class _SplashTagline extends StatelessWidget {
+  const _SplashTagline();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Text(
+      'Fresh groceries. Fast delivery.',
       textAlign: TextAlign.center,
       style: TextStyle(
-        fontSize: 18,
+        color: SplashColors.deepGreen,
+        fontSize: 17,
         height: 1.25,
-        fontWeight: FontWeight.w900,
+        fontWeight: FontWeight.w800,
         letterSpacing: 0,
       ),
     );
   }
 }
 
-class _BottomGroceryShowcase extends StatelessWidget {
-  const _BottomGroceryShowcase();
+class _DeliveryPill extends StatelessWidget {
+  const _DeliveryPill();
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: AppColors.primary,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(34)),
+        color: Colors.white.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.12)),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.28),
-            blurRadius: 24,
-            offset: const Offset(0, -8),
+            color: AppColors.primary.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 14),
-          const _GroceryProductVisuals(),
-          const SizedBox(height: 12),
-          Divider(
-            color: Colors.white.withValues(alpha: 0.2),
-            height: 1,
-            thickness: 1,
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              14,
-              14,
-              14,
-              14 + MediaQuery.paddingOf(context).bottom,
-            ),
-            child: const Row(
-              children: [
-                Expanded(
-                  child: _HighlightItem(
-                    icon: Icons.verified_rounded,
-                    label: 'Best Quality\nProducts',
-                  ),
-                ),
-                _HighlightDivider(),
-                Expanded(
-                  child: _HighlightItem(
-                    icon: Icons.local_offer_rounded,
-                    label: 'Best Prices\nEveryday',
-                  ),
-                ),
-                _HighlightDivider(),
-                Expanded(
-                  child: _HighlightItem(
-                    icon: Icons.delivery_dining_rounded,
-                    label: 'Fast & Reliable\nDelivery',
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GroceryProductVisuals extends StatelessWidget {
-  const _GroceryProductVisuals();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 118,
-      child: Stack(
-        alignment: Alignment.bottomCenter,
-        children: [
-          Positioned(
-            bottom: 0,
-            child: Container(
-              width: 286,
-              height: 18,
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-          ),
-          const Positioned(
-            left: 24,
-            bottom: 4,
-            child: _RiceSack(),
-          ),
-          const Positioned(
-            left: 92,
-            bottom: 7,
-            child: _AttaBag(),
-          ),
-          const Positioned(
-            bottom: 7,
-            child: _GheeJar(),
-          ),
-          const Positioned(
-            right: 92,
-            bottom: 7,
-            child: _OilBottle(),
-          ),
-          const Positioned(
-            right: 24,
-            bottom: 5,
-            child: _MilkCarton(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RiceSack extends StatelessWidget {
-  const _RiceSack();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 56,
-          height: 44,
-          decoration: BoxDecoration(
-            color: const Color(0xFFE7C38B),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: const Center(
-            child: Icon(Icons.rice_bowl_rounded, color: Colors.white, size: 28),
-          ),
-        ),
-        Container(
-          width: 62,
-          height: 26,
-          decoration: const BoxDecoration(
-            color: Color(0xFFD5A965),
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(12)),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _AttaBag extends StatelessWidget {
-  const _AttaBag();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 70,
-      height: 96,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF3DEB5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFD8B57A), width: 1.4),
-      ),
-      child: const Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.grass_rounded, color: AppColors.primary, size: 25),
-          SizedBox(height: 8),
-          Text(
-            'ATTA',
-            style: TextStyle(
-              color: Color(0xFF6B4A1E),
-              fontSize: 14,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          Text(
-            'WHOLE WHEAT',
-            style: TextStyle(
-              color: Color(0xFF6B4A1E),
-              fontSize: 7,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GheeJar extends StatelessWidget {
-  const _GheeJar();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 58,
-      height: 68,
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFE08A),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white, width: 3),
-      ),
-      child: const Center(
-        child: Text(
-          'Ghee',
-          style: TextStyle(
-            color: AppColors.primary,
-            fontSize: 14,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _OilBottle extends StatelessWidget {
-  const _OilBottle();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 30,
-          height: 16,
-          decoration: const BoxDecoration(
-            color: AppColors.accent,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(6)),
-          ),
-        ),
-        Container(
-          width: 50,
-          height: 86,
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFC857),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white, width: 3),
-          ),
-          child: const Center(
-            child:
-                Icon(Icons.water_drop_rounded, color: Colors.white, size: 28),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MilkCarton extends StatelessWidget {
-  const _MilkCarton();
-
-  @override
-  Widget build(BuildContext context) {
-    return Transform.rotate(
-      angle: -0.04,
-      child: Container(
-        width: 58,
-        height: 84,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFB7D8FF), width: 2),
-        ),
-        child: const Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.local_drink_rounded, color: Color(0xFF1976D2), size: 25),
-            SizedBox(height: 5),
-            Text(
-              'Milk',
-              style: TextStyle(
-                color: Color(0xFF1976D2),
-                fontSize: 14,
-                fontWeight: FontWeight.w900,
+            Icon(Icons.bolt_rounded, color: AppColors.accent, size: 19),
+            SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                'Daily essentials ready',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0,
+                ),
               ),
             ),
           ],
@@ -595,105 +348,118 @@ class _MilkCarton extends StatelessWidget {
   }
 }
 
-class _HighlightItem extends StatelessWidget {
-  const _HighlightItem({
-    required this.icon,
-    required this.label,
-  });
+class _LoadingStatus extends StatelessWidget {
+  const _LoadingStatus({required this.isLoading});
 
-  final IconData icon;
-  final String label;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      key: const ValueKey('loading'),
+      height: 44,
+      child: Center(
+        child: AnimatedOpacity(
+          opacity: isLoading ? 1 : 0,
+          duration: const Duration(milliseconds: 180),
+          child: const SizedBox(
+            width: 26,
+            height: 26,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.6,
+              color: AppColors.primary,
+              backgroundColor: AppColors.softGreen,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StartupRetry extends StatelessWidget {
+  const _StartupRetry({required this.onRetry});
+
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     return Column(
+      key: const ValueKey('retry'),
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, color: Colors.white, size: 27),
-        const SizedBox(height: 8),
-        Text(
-          label,
+        const Text(
+          'Unable to start GK Mart.',
           textAlign: TextAlign.center,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 11,
-            height: 1.15,
+          style: TextStyle(
+            color: AppColors.text,
             fontWeight: FontWeight.w800,
+            letterSpacing: 0,
           ),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: onRetry,
+          icon: const Icon(Icons.refresh_rounded),
+          label: const Text('Retry'),
         ),
       ],
     );
   }
 }
 
-class _HighlightDivider extends StatelessWidget {
-  const _HighlightDivider();
+class _SplashBackgroundPainter extends CustomPainter {
+  const _SplashBackgroundPainter();
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 46,
-      color: Colors.white.withValues(alpha: 0.24),
-    );
-  }
-}
+  void paint(Canvas canvas, Size size) {
+    final topBand = Paint()..color = AppColors.softGreen;
+    final topPath = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width, size.height * 0.22)
+      ..quadraticBezierTo(
+        size.width * 0.56,
+        size.height * 0.32,
+        0,
+        size.height * 0.24,
+      )
+      ..close();
+    canvas.drawPath(topPath, topBand);
 
-class _SubtleGroceryPattern extends StatelessWidget {
-  const _SubtleGroceryPattern();
+    final accentPaint = Paint()
+      ..color = AppColors.accent.withValues(alpha: 0.12)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 16
+      ..strokeCap = StrokeCap.round;
+    final accentPath = Path()
+      ..moveTo(size.width * 0.12, size.height * 0.78)
+      ..quadraticBezierTo(
+        size.width * 0.48,
+        size.height * 0.72,
+        size.width * 0.9,
+        size.height * 0.82,
+      );
+    canvas.drawPath(accentPath, accentPaint);
+
+    final greenLinePaint = Paint()
+      ..color = AppColors.primary.withValues(alpha: 0.08)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 10
+      ..strokeCap = StrokeCap.round;
+    final greenPath = Path()
+      ..moveTo(size.width * 0.08, size.height * 0.18)
+      ..quadraticBezierTo(
+        size.width * 0.44,
+        size.height * 0.12,
+        size.width * 0.86,
+        size.height * 0.2,
+      );
+    canvas.drawPath(greenPath, greenLinePaint);
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Stack(
-        children: const [
-          _PatternIcon(icon: Icons.shopping_bag_outlined, left: 34, top: 62),
-          _PatternIcon(icon: Icons.shopping_cart_outlined, right: 36, top: 96),
-          _PatternIcon(icon: Icons.eco_outlined, left: 38, top: 232),
-          _PatternIcon(icon: Icons.local_drink_outlined, right: 48, top: 260),
-          _PatternIcon(icon: Icons.local_offer_outlined, left: 44, bottom: 252),
-          _PatternIcon(
-            icon: Icons.inventory_2_outlined,
-            right: 42,
-            bottom: 286,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PatternIcon extends StatelessWidget {
-  const _PatternIcon({
-    required this.icon,
-    this.left,
-    this.top,
-    this.right,
-    this.bottom,
-  });
-
-  final IconData icon;
-  final double? left;
-  final double? top;
-  final double? right;
-  final double? bottom;
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned(
-      left: left,
-      top: top,
-      right: right,
-      bottom: bottom,
-      child: Icon(
-        icon,
-        color: AppColors.primary.withValues(alpha: 0.055),
-        size: 54,
-      ),
-    );
-  }
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class SplashColors {

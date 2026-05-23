@@ -24,6 +24,7 @@ import 'presentation/screens/home_screen.dart';
 import 'presentation/screens/orders_screen.dart';
 import 'presentation/screens/splash_screen.dart';
 import 'presentation/screens/wishlist_screen.dart';
+import 'presentation/widgets/app_bottom_nav_icon.dart';
 
 Future<void> main() async {
   runZonedGuarded<Future<void>>(() async {
@@ -81,113 +82,11 @@ class _MyAppState extends State<MyApp> {
       theme: AppTheme.light(),
       navigatorKey: NotificationNavigationService.navigatorKey,
       scaffoldMessengerKey: AppErrorHandler.scaffoldMessengerKey,
-      home: FutureBuilder<void>(
-        future: _firebaseInitialization,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const AppStartLogoScreen();
-          }
-
-          if (snapshot.hasError) {
-            return _AppStartErrorScreen(onRetry: _retryStartup);
-          }
-
-          return const SplashScreen();
-        },
+      home: SplashScreen(
+        startup: _firebaseInitialization,
+        onRetry: _retryStartup,
       ),
       debugShowCheckedModeBanner: false,
-    );
-  }
-}
-
-class AppStartLogoScreen extends StatelessWidget {
-  const AppStartLogoScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: AppColors.cream,
-      body: Center(
-        child: _GkLogoMark(),
-      ),
-    );
-  }
-}
-
-class _GkLogoMark extends StatelessWidget {
-  const _GkLogoMark();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 82,
-          height: 82,
-          decoration: const BoxDecoration(
-            color: AppColors.softGreen,
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.shopping_cart_rounded,
-            color: AppColors.primary,
-            size: 42,
-          ),
-        ),
-        const SizedBox(height: 16),
-        const Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: 'GK ',
-                style: TextStyle(color: AppColors.primary),
-              ),
-              TextSpan(
-                text: 'MART',
-                style: TextStyle(color: AppColors.accent),
-              ),
-            ],
-          ),
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 0,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _AppStartErrorScreen extends StatelessWidget {
-  const _AppStartErrorScreen({required this.onRetry});
-
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Unable to start GK Mart. Please try again.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -218,8 +117,29 @@ class AuthWrapper extends ConsumerWidget {
     return authState.when(
       data: (session) =>
           session == null ? const AuthScreen() : const MainScreen(),
-      loading: () => const AppStartLogoScreen(),
+      loading: () => const _AuthLoadingScreen(),
       error: (_, __) => const AuthScreen(),
+    );
+  }
+}
+
+class _AuthLoadingScreen extends StatelessWidget {
+  const _AuthLoadingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: AppColors.cream,
+      body: Center(
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.6,
+            color: AppColors.primary,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -344,42 +264,49 @@ class _MainScreenState extends ConsumerState<MainScreen> {
               onTap: _onItemTapped,
               items: [
                 const BottomNavigationBarItem(
-                  icon: Icon(Icons.home_rounded),
+                  icon: AppBottomNavIcon(
+                    icon: Icons.home_rounded,
+                    selected: false,
+                  ),
+                  activeIcon: AppBottomNavIcon(
+                    icon: Icons.home_rounded,
+                    selected: true,
+                  ),
                   label: 'Home',
                 ),
                 BottomNavigationBarItem(
-                  icon: Stack(
-                    children: [
-                      const Icon(Icons.favorite_border_rounded),
-                      if (wishlistCount > 0)
-                        Positioned(
-                          right: 0,
-                          top: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(3),
-                            decoration: const BoxDecoration(
-                              color: AppColors.accent,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Text(
-                              '$wishlistCount',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 8,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
+                  icon: AppBottomNavIcon(
+                    icon: Icons.favorite_border_rounded,
+                    selected: false,
+                    badgeCount: wishlistCount,
+                  ),
+                  activeIcon: AppBottomNavIcon(
+                    icon: Icons.favorite_rounded,
+                    selected: true,
+                    badgeCount: wishlistCount,
                   ),
                   label: 'Wishlist',
                 ),
                 const BottomNavigationBarItem(
-                  icon: Icon(Icons.receipt_long_rounded),
+                  icon: AppBottomNavIcon(
+                    icon: Icons.receipt_long_rounded,
+                    selected: false,
+                  ),
+                  activeIcon: AppBottomNavIcon(
+                    icon: Icons.receipt_long_rounded,
+                    selected: true,
+                  ),
                   label: 'Orders',
                 ),
                 const BottomNavigationBarItem(
-                  icon: Icon(Icons.person_outline_rounded),
+                  icon: AppBottomNavIcon(
+                    icon: Icons.person_outline_rounded,
+                    selected: false,
+                  ),
+                  activeIcon: AppBottomNavIcon(
+                    icon: Icons.person_rounded,
+                    selected: true,
+                  ),
                   label: 'Account',
                 ),
               ],

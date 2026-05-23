@@ -14,8 +14,8 @@ class AdminOrdersScreen extends ConsumerWidget {
   String _errorMessage(Object? error) {
     final message = error?.toString() ?? '';
 
-    if (message.contains('permission-denied')) {
-      return "You don't have permission to view orders";
+    if (AppErrorHandler.isPermissionDenied(error)) {
+      return 'Unable to load orders';
     }
 
     if (message.contains('failed-precondition') ||
@@ -596,17 +596,17 @@ class _OrderStatusStyle {
         );
       case OrderStatus.packed:
         return _OrderStatusStyle(
-          foreground: Colors.blue.shade800,
-          background: Colors.blue.shade50,
+          foreground: AppColors.info,
+          background: AppColors.info.withValues(alpha: 0.1),
         );
       case OrderStatus.outForDelivery:
         return _OrderStatusStyle(
-          foreground: Colors.purple.shade800,
-          background: Colors.purple.shade50,
+          foreground: AppColors.accent,
+          background: AppColors.softOrange,
         );
       case OrderStatus.delivered:
         return _OrderStatusStyle(
-          foreground: AppColors.primary,
+          foreground: AppColors.success,
           background: AppColors.softGreen,
         );
     }

@@ -35,6 +35,10 @@ class AppErrorHandler {
   static void showGlobalError(Object? error, {String? fallbackMessage}) {
     final messenger = scaffoldMessengerKey.currentState;
     if (messenger == null) return;
+    if (isPermissionDenied(error)) {
+      messenger.clearSnackBars();
+      return;
+    }
 
     messenger
       ..clearSnackBars()
@@ -51,6 +55,11 @@ class AppErrorHandler {
     if (!context.mounted) return;
 
     final messenger = ScaffoldMessenger.of(context);
+    if (isPermissionDenied(error)) {
+      messenger.clearSnackBars();
+      return;
+    }
+
     messenger
       ..clearSnackBars()
       ..showSnackBar(
@@ -58,7 +67,26 @@ class AppErrorHandler {
       );
   }
 
+  static bool isPermissionDenied(Object? error) {
+    if (error is RepositoryException) {
+      return error.code == 'permission-denied' ||
+          isPermissionDenied(error.cause);
+    }
+
+    if (error is FirebaseException) {
+      return error.code == 'permission-denied';
+    }
+
+    final message = error?.toString().toLowerCase() ?? '';
+    return message.contains('permission-denied') ||
+        message.contains('missing or insufficient permissions');
+  }
+
   static String messageFor(Object? error, {String? fallback}) {
+    if (isPermissionDenied(error)) {
+      return fallback ?? 'Unable to complete this action right now.';
+    }
+
     if (error is RepositoryException) {
       return error.message;
     }
@@ -81,9 +109,6 @@ class AppErrorHandler {
         message.contains('host lookup')) {
       return 'Network issue. Please check your connection and try again.';
     }
-    if (message.contains('permission-denied')) {
-      return "You don't have permission to perform this action.";
-    }
 
     return fallback ?? 'Something went wrong. Please try again.';
   }
@@ -96,7 +121,7 @@ class AppErrorHandler {
       case 'deadline-exceeded':
         return 'The request timed out. Please try again.';
       case 'permission-denied':
-        return "You don't have permission to perform this action.";
+        return null;
       case 'not-found':
         return 'The requested data could not be found.';
       case 'cancelled':
@@ -109,7 +134,6 @@ class AppErrorHandler {
         return 'Please login and try again.';
     }
 
-    final message = error.message?.trim();
-    return message == null || message.isEmpty ? null : message;
+    return null;
   }
 }
