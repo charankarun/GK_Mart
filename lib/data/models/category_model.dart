@@ -41,13 +41,35 @@ class CategoryModel extends Category {
   }
 
   Map<String, dynamic> toFirestore({required bool includeCreatedAt}) {
+    final normalizedName = name.trim();
+
     return {
-      CategoryField.name: name.trim(),
+      CategoryField.name: normalizedName,
+      CategoryField.searchName: normalizedName.toLowerCase(),
+      CategoryField.searchTokens: _searchTokens(normalizedName),
       CategoryField.imageUrl: imageUrl.trim(),
       if (includeCreatedAt)
         CategoryField.createdAt: FieldValue.serverTimestamp(),
       CategoryField.updatedAt: FieldValue.serverTimestamp(),
     };
+  }
+
+  static List<String> _searchTokens(String value) {
+    final tokens = <String>{};
+    final words = value
+        .trim()
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((word) => word.isNotEmpty);
+
+    for (final word in words) {
+      final maxLength = word.length > 24 ? 24 : word.length;
+      for (var index = 1; index <= maxLength; index += 1) {
+        tokens.add(word.substring(0, index));
+      }
+    }
+
+    return tokens.take(40).toList()..sort();
   }
 }
 
@@ -55,6 +77,8 @@ class CategoryField {
   const CategoryField._();
 
   static const name = 'name';
+  static const searchName = 'searchName';
+  static const searchTokens = 'searchTokens';
   static const imageUrl = 'imageUrl';
   static const createdAt = 'createdAt';
   static const updatedAt = 'updatedAt';

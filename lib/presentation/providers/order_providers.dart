@@ -100,10 +100,6 @@ final orderStatusUpdateControllerProvider =
 class OrderStatusUpdateController extends Notifier<Map<String, String>> {
   @override
   Map<String, String> build() {
-    ref.listen<AsyncValue<List<Order>>>(ordersStreamProvider, (_, next) {
-      next.whenData(_clearSyncedStatuses);
-    });
-
     return const <String, String>{};
   }
 
@@ -137,25 +133,6 @@ class OrderStatusUpdateController extends Notifier<Map<String, String>> {
       }
       state = nextState;
       rethrow;
-    }
-  }
-
-  void _clearSyncedStatuses(List<Order> orders) {
-    if (state.isEmpty) return;
-
-    final nextState = Map<String, String>.from(state);
-
-    for (final order in orders) {
-      final pendingStatus = nextState[order.id];
-      if (pendingStatus == null) continue;
-
-      if (OrderStatus.normalize(order.status) == pendingStatus) {
-        nextState.remove(order.id);
-      }
-    }
-
-    if (nextState.length != state.length) {
-      state = nextState;
     }
   }
 }
@@ -308,8 +285,15 @@ class OrderListState {
   }
 
   OrderListState appendPage(OrderPage page) {
+    final ordersById = <String, Order>{
+      for (final order in orders) order.id: order,
+    };
+    for (final order in page.orders) {
+      ordersById[order.id] = order;
+    }
+
     return OrderListState(
-      orders: [...orders, ...page.orders],
+      orders: ordersById.values.toList(),
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
     );

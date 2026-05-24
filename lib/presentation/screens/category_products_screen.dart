@@ -14,7 +14,7 @@ import '../widgets/app_state_widgets.dart';
 import '../widgets/product_card.dart';
 import 'product_detail_screen.dart';
 
-class CategoryProductsScreen extends ConsumerWidget {
+class CategoryProductsScreen extends ConsumerStatefulWidget {
   const CategoryProductsScreen({
     super.key,
     required this.category,
@@ -23,7 +23,40 @@ class CategoryProductsScreen extends ConsumerWidget {
   final Category category;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CategoryProductsScreen> createState() =>
+      _CategoryProductsScreenState();
+}
+
+class _CategoryProductsScreenState
+    extends ConsumerState<CategoryProductsScreen> {
+  final _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_handleScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_handleScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients) return;
+    if (_scrollController.position.extentAfter >
+        CategoryProductsConfig.loadMoreExtent) {
+      return;
+    }
+
+    _loadMore(showErrors: false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final category = widget.category;
     final request = CategoryProductsRequest(
       categoryId: category.id,
       categoryName: category.name,
@@ -69,6 +102,7 @@ class CategoryProductsScreen extends ConsumerWidget {
                         children: [
                           Expanded(
                             child: _ProductGrid(
+                              controller: _scrollController,
                               products: products,
                               cartQtyById: cartQtyById,
                               wishlistPendingProductIds:
@@ -122,9 +156,8 @@ class CategoryProductsScreen extends ConsumerWidget {
                             isLoading: productListState?.isLoadingMore ?? false,
                             hasMore: productListState?.hasMore ?? false,
                             onLoadMore: () => _loadMore(
-                              context: context,
-                              ref: ref,
                               request: request,
+                              showErrors: true,
                             ),
                           ),
                         ],
@@ -151,7 +184,7 @@ class CategoryProductsScreen extends ConsumerWidget {
     );
   }
 
-  static void _openProductDetail(BuildContext context, Product product) {
+  void _openProductDetail(BuildContext context, Product product) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -160,7 +193,7 @@ class CategoryProductsScreen extends ConsumerWidget {
     );
   }
 
-  static Future<void> _toggleWishlist({
+  Future<void> _toggleWishlist({
     required BuildContext context,
     required WidgetRef ref,
     required String userId,
@@ -184,15 +217,22 @@ class CategoryProductsScreen extends ConsumerWidget {
     }
   }
 
-  static Future<void> _loadMore({
-    required BuildContext context,
-    required WidgetRef ref,
-    required CategoryProductsRequest request,
+  Future<void> _loadMore({
+    CategoryProductsRequest? request,
+    required bool showErrors,
   }) async {
+    final effectiveRequest = request ??
+        CategoryProductsRequest(
+          categoryId: widget.category.id,
+          categoryName: widget.category.name,
+        );
+
     try {
-      await ref.read(categoryProductListProvider(request).notifier).loadNext();
+      await ref
+          .read(categoryProductListProvider(effectiveRequest).notifier)
+          .loadNext();
     } catch (error) {
-      if (!context.mounted) return;
+      if (!mounted || !showErrors) return;
 
       AppErrorHandler.showErrorSnackBar(
         context,
@@ -310,6 +350,7 @@ class _CategoryImageFallback extends StatelessWidget {
 
 class _ProductGrid extends StatelessWidget {
   const _ProductGrid({
+    required this.controller,
     required this.products,
     required this.cartQtyById,
     required this.wishlistPendingProductIds,
@@ -321,6 +362,7 @@ class _ProductGrid extends StatelessWidget {
     required this.onToggleWishlist,
   });
 
+  final ScrollController controller;
   final List<Product> products;
   final Map<String, int> cartQtyById;
   final Set<String> wishlistPendingProductIds;
@@ -338,6 +380,7 @@ class _ProductGrid extends StatelessWidget {
         final aspectRatio = constraints.maxWidth >= 720 ? 0.98 : 0.78;
 
         return GridView.builder(
+          controller: controller,
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           itemCount: products.length,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -474,4 +517,5 @@ class CategoryProductsConfig {
 
   static const categoryImageCacheExtent = 120;
   static const categoryImageDiskCacheExtent = 180;
+  static const loadMoreExtent = 420.0;
 }

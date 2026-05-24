@@ -66,6 +66,11 @@ class ProductModel extends Product {
     return {
       ProductField.name: normalizedName,
       ProductField.searchName: normalizedName.toLowerCase(),
+      ProductField.searchTokens: _searchTokens([
+        normalizedName,
+        categoryId,
+        unit,
+      ]),
       ProductField.categoryId: categoryId.trim(),
       ProductField.price: price,
       ProductField.discountPrice: discountPrice,
@@ -124,6 +129,27 @@ class ProductModel extends Product {
     final threshold = readInt(value);
     return threshold < 0 ? 5 : threshold;
   }
+
+  static List<String> _searchTokens(Iterable<String> values) {
+    final tokens = <String>{};
+
+    for (final value in values) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized.isEmpty) continue;
+
+      final words = normalized
+          .split(RegExp(r'[^a-z0-9]+'))
+          .where((word) => word.isNotEmpty);
+      for (final word in words) {
+        final maxLength = word.length > 24 ? 24 : word.length;
+        for (var index = 1; index <= maxLength; index += 1) {
+          tokens.add(word.substring(0, index));
+        }
+      }
+    }
+
+    return tokens.take(80).toList()..sort();
+  }
 }
 
 class ProductField {
@@ -131,6 +157,7 @@ class ProductField {
 
   static const name = 'name';
   static const searchName = 'searchName';
+  static const searchTokens = 'searchTokens';
   static const categoryId = 'categoryId';
   static const price = 'price';
   static const discountPrice = 'discountPrice';

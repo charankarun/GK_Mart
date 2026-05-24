@@ -35,6 +35,9 @@ class ProductRepositoryImpl implements ProductRepository {
     'image/webp',
   };
   static const _prefixSearchTerminator = '\uf8ff';
+  static const _searchSourceTokens = 'tokens';
+  static const _searchSourceSearchName = 'searchName';
+  static const _searchSourceLegacyNamePrefix = 'legacyName:';
   static final Map<String, Product> _productCache = <String, Product>{};
 
   CollectionReference<Map<String, dynamic>> get _products {
@@ -224,26 +227,69 @@ class ProductRepositoryImpl implements ProductRepository {
           return const ProductPage(products: <Product>[], hasMore: false);
         }
 
-        Query<Map<String, dynamic>> productQuery = _products
-            .where(
-              ProductField.searchName,
-              isGreaterThanOrEqualTo: normalizedQuery,
-            )
-            .where(
-              ProductField.searchName,
-              isLessThanOrEqualTo: '$normalizedQuery$_prefixSearchTerminator',
-            )
-            .orderBy(ProductField.searchName)
-            .limit(safeLimit);
-        productQuery = await _startAfterProductCursor(
-          query: productQuery,
-          cursor: cursor,
-          fallbackValue: cursor?.name.toLowerCase(),
-        );
+        final cursorSource = cursor?.source;
+        if (cursorSource == _searchSourceTokens) {
+          try {
+            return await _fetchTokenSearchPage(
+              query: normalizedQuery,
+              limit: safeLimit,
+              cursor: cursor,
+            );
+          } on FirebaseException catch (error) {
+            if (!_isMissingIndex(error)) rethrow;
+          }
+        }
+        if (cursorSource == _searchSourceSearchName) {
+          return _fetchSearchNamePage(
+            query: normalizedQuery,
+            limit: safeLimit,
+            cursor: cursor,
+          );
+        }
+        if (cursorSource?.startsWith(_searchSourceLegacyNamePrefix) == true) {
+          return _fetchLegacyNamePage(
+            queryVariant: cursorSource!.substring(
+              _searchSourceLegacyNamePrefix.length,
+            ),
+            limit: safeLimit,
+            cursor: cursor,
+          );
+        }
 
-        final snapshot =
-            await productQuery.get().timeout(AppDurations.networkTimeout);
-        return _pageFromSnapshot(snapshot, safeLimit);
+        try {
+          final tokenPage = await _fetchTokenSearchPage(
+            query: normalizedQuery,
+            limit: safeLimit,
+            cursor: cursor,
+          );
+          if (tokenPage.products.isNotEmpty || tokenPage.hasMore) {
+            return tokenPage;
+          }
+        } on FirebaseException catch (error) {
+          if (!_isMissingIndex(error)) rethrow;
+        }
+
+        final searchNamePage = await _fetchSearchNamePage(
+          query: normalizedQuery,
+          limit: safeLimit,
+          cursor: cursor,
+        );
+        if (searchNamePage.products.isNotEmpty || searchNamePage.hasMore) {
+          return searchNamePage;
+        }
+
+        for (final queryVariant in _legacyNameQueryVariants(query)) {
+          final legacyPage = await _fetchLegacyNamePage(
+            queryVariant: queryVariant,
+            limit: safeLimit,
+            cursor: cursor,
+          );
+          if (legacyPage.products.isNotEmpty || legacyPage.hasMore) {
+            return legacyPage;
+          }
+        }
+
+        return const ProductPage(products: <Product>[], hasMore: false);
       },
     );
   }
@@ -385,17 +431,22 @@ class ProductRepositoryImpl implements ProductRepository {
 
   ProductPage _pageFromSnapshot(
     QuerySnapshot<Map<String, dynamic>> snapshot,
-    int limit,
-  ) {
+    int limit, {
+    String? cursorSource,
+    String Function(QueryDocumentSnapshot<Map<String, dynamic>> doc)?
+        cursorName,
+  }) {
     final products = snapshot.docs.map(ProductModel.fromFirestore).toList();
     _cacheProducts(products);
 
     ProductPageCursor? nextCursor;
     if (products.isNotEmpty) {
+      final lastDoc = snapshot.docs.last;
       final lastProduct = products.last;
       nextCursor = ProductPageCursor(
         id: lastProduct.id,
-        name: lastProduct.name,
+        name: cursorName?.call(lastDoc) ?? lastProduct.name,
+        source: cursorSource,
       );
     }
 
@@ -403,6 +454,92 @@ class ProductRepositoryImpl implements ProductRepository {
       products: products,
       nextCursor: nextCursor,
       hasMore: snapshot.docs.length == limit,
+    );
+  }
+
+  Future<ProductPage> _fetchTokenSearchPage({
+    required String query,
+    required int limit,
+    required ProductPageCursor? cursor,
+  }) async {
+    final token = _searchToken(query);
+    if (token.isEmpty) {
+      return const ProductPage(products: <Product>[], hasMore: false);
+    }
+
+    Query<Map<String, dynamic>> productQuery = _products
+        .where(ProductField.searchTokens, arrayContains: token)
+        .orderBy(ProductField.searchName)
+        .limit(limit);
+    productQuery = await _startAfterProductCursor(
+      query: productQuery,
+      cursor: cursor,
+      fallbackValue: cursor?.name.toLowerCase(),
+    );
+
+    final snapshot =
+        await productQuery.get().timeout(AppDurations.networkTimeout);
+    return _pageFromSnapshot(
+      snapshot,
+      limit,
+      cursorSource: _searchSourceTokens,
+      cursorName: _searchNameCursorValue,
+    );
+  }
+
+  Future<ProductPage> _fetchSearchNamePage({
+    required String query,
+    required int limit,
+    required ProductPageCursor? cursor,
+  }) async {
+    Query<Map<String, dynamic>> productQuery = _products
+        .where(
+          ProductField.searchName,
+          isGreaterThanOrEqualTo: query,
+        )
+        .where(
+          ProductField.searchName,
+          isLessThanOrEqualTo: '$query$_prefixSearchTerminator',
+        )
+        .orderBy(ProductField.searchName)
+        .limit(limit);
+    productQuery = await _startAfterProductCursor(
+      query: productQuery,
+      cursor: cursor,
+      fallbackValue: cursor?.name.toLowerCase(),
+    );
+
+    final snapshot =
+        await productQuery.get().timeout(AppDurations.networkTimeout);
+    return _pageFromSnapshot(
+      snapshot,
+      limit,
+      cursorSource: _searchSourceSearchName,
+      cursorName: _searchNameCursorValue,
+    );
+  }
+
+  Future<ProductPage> _fetchLegacyNamePage({
+    required String queryVariant,
+    required int limit,
+    required ProductPageCursor? cursor,
+  }) async {
+    Query<Map<String, dynamic>> productQuery = _products
+        .orderBy(ProductField.name)
+        .startAt([queryVariant]).endAt(
+            ['$queryVariant$_prefixSearchTerminator']).limit(limit);
+    productQuery = await _startAfterProductCursor(
+      query: productQuery,
+      cursor: cursor,
+      fallbackValue: cursor?.name,
+    );
+
+    final snapshot =
+        await productQuery.get().timeout(AppDurations.networkTimeout);
+    return _pageFromSnapshot(
+      snapshot,
+      limit,
+      cursorSource: '$_searchSourceLegacyNamePrefix$queryVariant',
     );
   }
 
@@ -479,5 +616,49 @@ class ProductRepositoryImpl implements ProductRepository {
 
   static bool _isAllowedImageContentType(String contentType) {
     return _allowedImageContentTypes.contains(contentType.trim().toLowerCase());
+  }
+
+  static bool _isMissingIndex(FirebaseException error) {
+    return error.code == 'failed-precondition' &&
+        (error.message?.toLowerCase().contains('index') ?? false);
+  }
+
+  static String _searchNameCursorValue(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data();
+    final value = data[ProductField.searchName]?.toString().trim();
+    if (value != null && value.isNotEmpty) return value;
+    return data[ProductField.name]?.toString().trim().toLowerCase() ?? '';
+  }
+
+  static String _searchToken(String query) {
+    final words = query
+        .trim()
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((word) => word.isNotEmpty)
+        .toList();
+    if (words.isEmpty) return '';
+    return words.last;
+  }
+
+  static List<String> _legacyNameQueryVariants(String query) {
+    final trimmedQuery = query.trim();
+    if (trimmedQuery.isEmpty) return const <String>[];
+
+    final lower = trimmedQuery.toLowerCase();
+    final upper = trimmedQuery.toUpperCase();
+    final title = lower.split(RegExp(r'\s+')).map((word) {
+      if (word.isEmpty) return word;
+      return '${word[0].toUpperCase()}${word.substring(1)}';
+    }).join(' ');
+
+    return {
+      trimmedQuery,
+      lower,
+      title,
+      upper,
+    }.where((value) => value.trim().isNotEmpty).toList();
   }
 }

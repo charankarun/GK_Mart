@@ -29,16 +29,12 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   final _scrollController = ScrollController();
-  final _searchController = TextEditingController();
-  final _searchFocusNode = FocusNode();
   bool _didPrecacheBanner = false;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_handleScroll);
-    _searchController.addListener(_handleSearchTextChanged);
-    _searchFocusNode.addListener(_handleSearchFocusChanged);
   }
 
   @override
@@ -60,20 +56,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void dispose() {
     _scrollController.removeListener(_handleScroll);
-    _searchController.removeListener(_handleSearchTextChanged);
-    _searchFocusNode.removeListener(_handleSearchFocusChanged);
     _scrollController.dispose();
-    _searchController.dispose();
-    _searchFocusNode.dispose();
     super.dispose();
-  }
-
-  void _handleSearchFocusChanged() {
-    if (mounted) setState(() {});
-  }
-
-  void _handleSearchTextChanged() {
-    if (mounted) setState(() {});
   }
 
   void _handleScroll() {
@@ -142,9 +126,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                       onTap: _openAddress,
                     ),
                     _SearchSection(
-                      controller: _searchController,
-                      focusNode: _searchFocusNode,
-                      onSearchSubmitted: _openSearchResults,
+                      onTap: _openSearchResults,
                     ),
                     _PromoBanner(onShopNow: _scrollToProducts),
                     _CategorySection(
@@ -233,7 +215,6 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   void _openProductDetail(Product product) {
-    _searchFocusNode.unfocus();
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -242,24 +223,16 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  void _openSearchResults(String query) {
-    final normalizedQuery = query.trim();
-    if (normalizedQuery.isEmpty) {
-      _searchFocusNode.requestFocus();
-      return;
-    }
-
-    _searchFocusNode.unfocus();
+  void _openSearchResults() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => SearchResultsScreen(query: normalizedQuery),
+        builder: (_) => const SearchResultsScreen(),
       ),
     );
   }
 
   void _openCategoryProducts(Category category) {
-    _searchFocusNode.unfocus();
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -317,7 +290,6 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   void _scrollToProducts() {
-    _searchFocusNode.unfocus();
     _scrollController.animateTo(
       HomeConfig.productsScrollOffset,
       duration: const Duration(milliseconds: 420),
@@ -616,14 +588,10 @@ class _DeliveryLocation extends StatelessWidget {
 
 class _SearchSection extends StatelessWidget {
   const _SearchSection({
-    required this.controller,
-    required this.focusNode,
-    required this.onSearchSubmitted,
+    required this.onTap,
   });
 
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final ValueChanged<String> onSearchSubmitted;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -631,48 +599,45 @@ class _SearchSection extends StatelessWidget {
       color: AppColors.card,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: Container(
-          height: 52,
-          decoration: BoxDecoration(
-            color: AppColors.card,
+        child: Material(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          child: InkWell(
             borderRadius: BorderRadius.circular(AppRadii.lg),
-            border: Border.all(color: AppColors.border),
-            boxShadow: AppShadows.soft,
-          ),
-          child: TextField(
-            controller: controller,
-            focusNode: focusNode,
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: HomeText.searchHint,
-              hintStyle: const TextStyle(
-                color: AppColors.mutedText,
-                fontWeight: FontWeight.w500,
+            onTap: onTap,
+            child: Container(
+              height: 52,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                border: Border.all(color: AppColors.border),
+                boxShadow: AppShadows.soft,
               ),
-              prefixIcon: IconButton(
-                tooltip: HomeText.search,
-                icon: const Icon(
-                  Icons.search_rounded,
-                  color: AppColors.primary,
-                ),
-                onPressed: () => onSearchSubmitted(controller.text),
-              ),
-              suffixIcon: controller.text.trim().isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: HomeText.clearSearch,
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: () {
-                        controller.clear();
-                        focusNode.requestFocus();
-                      },
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: const Row(
+                children: [
+                  Icon(
+                    Icons.search_rounded,
+                    color: AppColors.primary,
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      HomeText.searchHint,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.mutedText,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppColors.mutedText,
+                  ),
+                ],
+              ),
             ),
-            onSubmitted: onSearchSubmitted,
           ),
         ),
       ),

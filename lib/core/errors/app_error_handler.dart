@@ -79,7 +79,10 @@ class AppErrorHandler {
 
     final message = error?.toString().toLowerCase() ?? '';
     return message.contains('permission-denied') ||
-        message.contains('missing or insufficient permissions');
+        message.contains('missing or insufficient permissions') ||
+        message.contains("don't have permission") ||
+        message.contains('do not have permission') ||
+        message.contains('permission to perform this action');
   }
 
   static String messageFor(Object? error, {String? fallback}) {

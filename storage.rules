@@ -14,6 +14,12 @@ service firebase.storage {
       return firestore.get(/databases/(default)/documents/admin_config/admins).data;
     }
 
+    function adminUidMatches() {
+      return request.auth.uid in adminData().get('uids', [])
+        || request.auth.uid in adminData().get('adminUids', [])
+        || request.auth.uid in adminData().get('admin_uids', []);
+    }
+
     function adminEmailMatches() {
       return request.auth.token.email is string
         && (
@@ -32,10 +38,42 @@ service firebase.storage {
         );
     }
 
+    function adminClaimMatches() {
+      return request.auth.token.admin == true
+        || request.auth.token.role == 'admin'
+        || request.auth.token.role == 'owner'
+        || request.auth.token.role == 'Admin'
+        || request.auth.token.role == 'Owner';
+    }
+
+    function userProfileExists() {
+      return firestore.exists(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function userProfileData() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userRoleMatches() {
+      return userProfileExists()
+        && (
+          userProfileData().get('role', '') == 'admin'
+          || userProfileData().get('role', '') == 'owner'
+          || userProfileData().get('role', '') == 'Admin'
+          || userProfileData().get('role', '') == 'Owner'
+        );
+    }
+
     function isAdmin() {
       return signedIn()
-        && adminConfigExists()
-        && (adminEmailMatches() || adminPhoneMatches());
+        && (
+          adminClaimMatches()
+          || userRoleMatches()
+          || (
+            adminConfigExists()
+            && (adminUidMatches() || adminEmailMatches() || adminPhoneMatches())
+          )
+        );
     }
 
     function validImage(maxBytes) {

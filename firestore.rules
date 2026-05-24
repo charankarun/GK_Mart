@@ -18,6 +18,12 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/admin_config/admins).data;
     }
 
+    function adminUidMatches() {
+      return request.auth.uid in adminData().get('uids', [])
+        || request.auth.uid in adminData().get('adminUids', [])
+        || request.auth.uid in adminData().get('admin_uids', []);
+    }
+
     function adminEmailMatches() {
       return request.auth.token.email is string
         && (
@@ -36,10 +42,42 @@ service cloud.firestore {
         );
     }
 
+    function adminClaimMatches() {
+      return request.auth.token.admin == true
+        || request.auth.token.role == 'admin'
+        || request.auth.token.role == 'owner'
+        || request.auth.token.role == 'Admin'
+        || request.auth.token.role == 'Owner';
+    }
+
+    function userProfileExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userProfileData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userRoleMatches() {
+      return userProfileExists()
+        && (
+          userProfileData().get('role', '') == 'admin'
+          || userProfileData().get('role', '') == 'owner'
+          || userProfileData().get('role', '') == 'Admin'
+          || userProfileData().get('role', '') == 'Owner'
+        );
+    }
+
     function isAdmin() {
       return signedIn()
-        && adminConfigExists()
-        && (adminEmailMatches() || adminPhoneMatches());
+        && (
+          adminClaimMatches()
+          || userRoleMatches()
+          || (
+            adminConfigExists()
+            && (adminUidMatches() || adminEmailMatches() || adminPhoneMatches())
+          )
+        );
     }
 
     function validOrderStatus(status) {
@@ -114,8 +152,10 @@ service cloud.firestore {
         && data.get('name', '').size() > 0
         && data.get('searchName', data.get('name', '')) is string
         && data.get('searchName', data.get('name', '')).size() > 0
-        && data.get('categoryId', '') is string
-        && data.get('categoryId', '').size() > 0
+        && data.get('searchTokens', []) is list
+        && data.get('searchTokens', []).size() <= 120
+        && data.get('categoryId', data.get('category', '')) is string
+        && data.get('categoryId', data.get('category', '')).size() > 0
         && data.get('price', -1) is number
         && data.get('price', -1) > 0
         && data.get('discountPrice', 0) is number
@@ -134,6 +174,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           'name',
           'searchName',
+          'searchTokens',
           'categoryId',
           'price',
           'discountPrice',
@@ -148,6 +189,7 @@ service cloud.firestore {
         && data.keys().hasAll([
           'name',
           'searchName',
+          'searchTokens',
           'categoryId',
           'price',
           'discountPrice',
@@ -165,6 +207,7 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'name',
           'searchName',
+          'searchTokens',
           'categoryId',
           'price',
           'discountPrice',
@@ -183,6 +226,10 @@ service cloud.firestore {
       let data = request.resource.data;
       return data.get('name', '') is string
         && data.get('name', '').size() > 0
+        && data.get('searchName', data.get('name', '')) is string
+        && data.get('searchName', data.get('name', '')).size() > 0
+        && data.get('searchTokens', []) is list
+        && data.get('searchTokens', []).size() <= 80
         && data.get('imageUrl', '') is string;
     }
 
@@ -190,12 +237,16 @@ service cloud.firestore {
       let data = request.resource.data;
       return data.keys().hasOnly([
           'name',
+          'searchName',
+          'searchTokens',
           'imageUrl',
           'createdAt',
           'updatedAt',
         ])
         && data.keys().hasAll([
           'name',
+          'searchName',
+          'searchTokens',
           'imageUrl',
           'createdAt',
           'updatedAt',
@@ -208,6 +259,8 @@ service cloud.firestore {
     function validCategoryUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'name',
+          'searchName',
+          'searchTokens',
           'imageUrl',
           'updatedAt',
         ])

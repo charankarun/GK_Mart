@@ -115,10 +115,6 @@ class _ProductImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final url = imageUrl.trim().isEmpty
-        ? ProductCardAssets.fallbackProductImage
-        : imageUrl.trim();
-
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(
         top: Radius.circular(AppRadii.lg),
@@ -126,7 +122,7 @@ class _ProductImage extends StatelessWidget {
       child: AspectRatio(
         aspectRatio: 1.62,
         child: AppCachedNetworkImage(
-          imageUrl: url,
+          imageUrl: imageUrl,
           fit: BoxFit.cover,
           filterQuality: FilterQuality.medium,
           memCacheWidth: ProductCardConfig.imageMemCacheWidth,
@@ -412,13 +408,6 @@ int _discountPercent(Product product) {
 
 String _formatPrice(double price) {
   return price % 1 == 0 ? price.toStringAsFixed(0) : price.toStringAsFixed(2);
-}
-
-class ProductCardAssets {
-  const ProductCardAssets._();
-
-  static const fallbackProductImage =
-      'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=85';
 }
 
 class ProductCardConfig {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../core/constants/app_constants.dart';
@@ -17,39 +19,106 @@ class FirestoreAdminRepository implements AdminRepository {
         .doc(FirestoreDocuments.admins);
   }
 
-  @override
-  Stream<bool> watchIsAdmin(AuthSession session) async* {
-    yield* RepositoryGuard.watch(
-      message: 'Unable to verify admin access.',
-      create: () async* {
-        try {
-          await for (final doc in _adminConfigRef.snapshots()) {
-            final data = doc.data();
-            if (data == null) {
-              yield false;
-              continue;
-            }
+  DocumentReference<Map<String, dynamic>> _userRef(String uid) {
+    return _firestore.collection(FirestoreCollections.users).doc(uid);
+  }
 
-            yield _matchesAdminConfig(session, data);
-          }
-        } catch (_) {
-          yield false;
-        }
+  @override
+  Stream<bool> watchIsAdmin(AuthSession session) {
+    return RepositoryGuard.watch(
+      message: 'Unable to verify admin access.',
+      create: () => _watchAdminAccess(session),
+    );
+  }
+
+  Stream<bool> _watchAdminAccess(AuthSession session) {
+    final uid = session.uid.trim();
+    if (uid.isEmpty) return Stream.value(false);
+
+    late StreamController<bool> controller;
+    StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+        adminConfigSubscription;
+    StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+        userProfileSubscription;
+    Map<String, dynamic>? adminConfig;
+    Map<String, dynamic>? userProfile;
+    bool? lastValue;
+
+    void emit() {
+      if (controller.isClosed) return;
+
+      final isAdmin = _matchesAdminConfig(session, adminConfig) ||
+          _hasAdminRole(userProfile);
+      if (lastValue == isAdmin) return;
+
+      lastValue = isAdmin;
+      controller.add(isAdmin);
+    }
+
+    controller = StreamController<bool>(
+      onListen: () {
+        adminConfigSubscription = _adminConfigRef.snapshots().listen(
+          (doc) {
+            adminConfig = doc.data();
+            emit();
+          },
+          onError: (_) {
+            adminConfig = null;
+            emit();
+          },
+        );
+
+        userProfileSubscription = _userRef(uid).snapshots().listen(
+          (doc) {
+            userProfile = doc.data();
+            emit();
+          },
+          onError: (_) {
+            userProfile = null;
+            emit();
+          },
+        );
+      },
+      onCancel: () async {
+        await adminConfigSubscription?.cancel();
+        await userProfileSubscription?.cancel();
       },
     );
+
+    return controller.stream;
   }
 
   bool _matchesAdminConfig(
     AuthSession session,
-    Map<String, dynamic> data,
+    Map<String, dynamic>? data,
   ) {
+    if (data == null || data.isEmpty) return false;
+
+    final adminUids = _adminUids(data);
     final adminEmails = _adminEmails(data);
     final adminPhones = _adminPhones(data);
+    final uid = session.uid.trim();
     final email = session.email?.trim().toLowerCase();
     final phone = session.phoneNumber?.trim();
 
-    return (email != null && adminEmails.contains(email)) ||
+    return (uid.isNotEmpty && adminUids.contains(uid)) ||
+        (email != null && adminEmails.contains(email)) ||
         (phone != null && _containsPhone(adminPhones, phone));
+  }
+
+  bool _hasAdminRole(Map<String, dynamic>? data) {
+    final role = data?['role']?.toString().trim().toLowerCase();
+    return role == 'admin' || role == 'owner';
+  }
+
+  Set<String> _adminUids(Map<String, dynamic> data) {
+    return {
+      ...readStringList(data['uids']),
+      ...readStringList(data['adminUids']),
+      ...readStringList(data['admin_uids']),
+    }.map((uid) => uid.trim()).where((uid) {
+      return uid.isNotEmpty;
+    }).toSet();
   }
 
   Set<String> _adminEmails(Map<String, dynamic> data) {

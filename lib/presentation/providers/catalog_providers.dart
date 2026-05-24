@@ -160,8 +160,15 @@ class ProductListState {
   }
 
   ProductListState appendPage(ProductPage page) {
+    final productsById = <String, Product>{
+      for (final product in products) product.id: product,
+    };
+    for (final product in page.products) {
+      productsById[product.id] = product;
+    }
+
     return ProductListState(
-      products: [...products, ...page.products],
+      products: productsById.values.toList(),
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
     );
