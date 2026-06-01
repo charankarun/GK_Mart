@@ -105,9 +105,13 @@ service cloud.firestore {
           'address',
           'pincode',
           'items',
+          'originalAmount',
+          'cartDiscount',
+          'deliveryFee',
           'totalAmount',
           'total',
           'totalSavings',
+          'searchTokens',
           'status',
           'paymentMethod',
           'createdAt',
@@ -134,8 +138,21 @@ service cloud.firestore {
         && data.totalAmount >= 0
         && data.total is number
         && data.total == data.totalAmount
+        && data.get('originalAmount', data.totalAmount) is number
+        && data.get('originalAmount', data.totalAmount) >= 0
+        && data.get('cartDiscount', 0) is number
+        && data.get('cartDiscount', 0) >= 0
+        && data.get('deliveryFee', 0) is number
+        && data.get('deliveryFee', 0) >= 0
+        && data.totalAmount
+          == data.get('originalAmount', data.totalAmount)
+            - data.get('cartDiscount', 0)
+            + data.get('deliveryFee', 0)
         && data.get('totalSavings', 0) is number
         && data.get('totalSavings', 0) >= 0
+        && data.get('totalSavings', 0) >= data.get('cartDiscount', 0)
+        && data.get('searchTokens', []) is list
+        && data.get('searchTokens', []).size() <= 120
         && data.get('userName', '') is string
         && data.get('customerName', '') is string
         && data.get('phone', '') is string
@@ -163,6 +180,10 @@ service cloud.firestore {
         && data.get('imageUrl', '') is string
         && data.get('isAvailable', true) is bool
         && data.get('unit', '') is string
+        && data.get('barcode', '') is string
+        && data.get('barcode', '').size() <= 64
+        && data.get('brand', '') is string
+        && data.get('brand', '').size() <= 80
         && data.get('stockQuantity', 0) is number
         && data.get('stockQuantity', 0) >= 0
         && data.get('lowStockThreshold', 5) is number
@@ -181,6 +202,8 @@ service cloud.firestore {
           'imageUrl',
           'isAvailable',
           'unit',
+          'barcode',
+          'brand',
           'stockQuantity',
           'lowStockThreshold',
           'createdAt',
@@ -195,6 +218,8 @@ service cloud.firestore {
           'discountPrice',
           'imageUrl',
           'isAvailable',
+          'barcode',
+          'brand',
           'createdAt',
           'updatedAt',
         ])
@@ -214,6 +239,8 @@ service cloud.firestore {
           'imageUrl',
           'isAvailable',
           'unit',
+          'barcode',
+          'brand',
           'stockQuantity',
           'lowStockThreshold',
           'updatedAt',
@@ -354,17 +381,30 @@ service cloud.firestore {
         && data.lastSeenAt == request.time;
     }
 
+    function validFcmTokenCreatedAtUpdate() {
+      return (
+          resource.data.keys().hasAll(['createdAt'])
+          && request.resource.data.createdAt == resource.data.createdAt
+        )
+        || (
+          !resource.data.keys().hasAny(['createdAt'])
+          && request.resource.data.keys().hasAll(['createdAt'])
+          && request.resource.data.createdAt == request.time
+        );
+    }
+
     function validFcmTokenUpdate(tokenId) {
       return validFcmTokenId(tokenId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'token',
           'platform',
           'enabled',
+          'createdAt',
           'updatedAt',
           'lastSeenAt',
         ])
         && validFcmTokenFields(request.resource.data)
-        && request.resource.data.createdAt == resource.data.createdAt
+        && validFcmTokenCreatedAtUpdate()
         && request.resource.data.updatedAt == request.time
         && request.resource.data.lastSeenAt == request.time;
     }
@@ -439,10 +479,9 @@ service cloud.firestore {
       }
 
       match /fcmTokens/{tokenId} {
-        allow read: if isOwner(userId);
-        allow create: if isOwner(userId) && validFcmTokenCreate(tokenId);
-        allow update: if isOwner(userId) && validFcmTokenUpdate(tokenId);
-        allow delete: if isOwner(userId);
+        allow read, create, update, delete:
+            if request.auth != null
+            && request.auth.uid == userId;
       }
     }
 

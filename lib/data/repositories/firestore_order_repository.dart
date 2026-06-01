@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
@@ -5,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import '../../core/constants/app_constants.dart';
 import '../../core/errors/repository_exception.dart';
 import '../../domain/entities/cart_item.dart';
+import '../../domain/entities/cart_pricing.dart';
 import '../../domain/entities/customer_order.dart';
 import '../../domain/entities/order_analytics.dart';
 import '../../domain/entities/order_page.dart';
@@ -21,6 +23,12 @@ class FirestoreOrderRepository implements OrderRepository {
   static const _maxPageLimit = 60;
   static const _orderIdAttempts = 12;
   static const _orderIdAlphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  static const _prefixSearchTerminator = '\uf8ff';
+  static const _maxOrderSearchTokens = 120;
+  static const _revenueFields = ['totalAmount', 'total', 'paymentAmount'];
+  static const _dateFields = ['timestamp', 'createdAt', 'orderDate'];
+  static const _dashboardLogName = 'AdminDashboard';
+  static const _debugLoggingEnabled = !bool.fromEnvironment('dart.vm.product');
 
   CollectionReference<Map<String, dynamic>> get _orders {
     return _firestore.collection(FirestoreCollections.orders);
@@ -133,43 +141,109 @@ class FirestoreOrderRepository implements OrderRepository {
   }
 
   @override
-  Future<OrderAnalytics> fetchOrderAnalytics() {
+  Future<OrderPage> searchAdminOrders({
+    required String query,
+    required int limit,
+  }) {
+    return RepositoryGuard.run(
+      message: 'Unable to search orders.',
+      action: () async {
+        final safeLimit = _safeLimit(limit);
+        final searchText = query.trim();
+        final searchToken = _searchTokenFor(searchText);
+        if (safeLimit <= 0 || searchText.isEmpty) {
+          return const OrderPage(orders: <Order>[], hasMore: false);
+        }
+
+        final ordersById = <String, Order>{};
+
+        for (final candidateId in _candidateOrderIds(searchText)) {
+          final doc = await _orders.doc(candidateId).get().timeout(
+                AppDurations.networkTimeout,
+              );
+          if (doc.exists) {
+            final order = _fromDocument(doc);
+            ordersById[order.id] = order;
+          }
+        }
+
+        if (searchToken.length >= 3) {
+          final tokenSnapshot = await _orders
+              .where('searchTokens', arrayContains: searchToken)
+              .orderBy('timestamp', descending: true)
+              .limit(safeLimit)
+              .get()
+              .timeout(AppDurations.networkTimeout);
+          for (final doc in tokenSnapshot.docs) {
+            final order = _fromDocument(doc);
+            ordersById[order.id] = order;
+          }
+        }
+
+        final prefix = searchText.toUpperCase();
+        if (prefix.length >= 3) {
+          final prefixSnapshot = await _orders
+              .orderBy('orderId')
+              .startAt([prefix])
+              .endAt(['$prefix$_prefixSearchTerminator'])
+              .limit(safeLimit)
+              .get()
+              .timeout(AppDurations.networkTimeout);
+          for (final doc in prefixSnapshot.docs) {
+            final order = _fromDocument(doc);
+            ordersById[order.id] = order;
+          }
+        }
+
+        final orders = ordersById.values.toList()
+          ..sort((a, b) {
+            final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return bDate.compareTo(aDate);
+          });
+
+        return OrderPage(
+          orders: orders.take(safeLimit).toList(),
+          hasMore: false,
+        );
+      },
+    );
+  }
+
+  @override
+  Future<OrderAnalytics> fetchOrderAnalytics({DateTime? date}) {
     return RepositoryGuard.run(
       message: 'Unable to load order analytics.',
       action: () async {
-        final allOrders = _orders;
-        final pendingOrders = _orders.where(
-          'status',
-          whereIn: [
-            OrderStatus.placed,
-            OrderStatus.packed,
-            OrderStatus.outForDelivery,
-          ],
+        final selectedDate = _dateOnly(date ?? DateTime.now());
+        final nextDate = selectedDate.add(const Duration(days: 1));
+        _dashboardLog(
+          'Dashboard analytics initialization selectedDate='
+          '${selectedDate.toIso8601String()}',
         );
-        final deliveredOrders = _orders.where(
-          'status',
-          isEqualTo: OrderStatus.delivered,
+        _dashboardLog(
+          'Date filter query start=${selectedDate.toIso8601String()} '
+          'end=${nextDate.toIso8601String()} fields=$_dateFields',
+        );
+        _dashboardLog('Orders query start collection=orders');
+
+        final ordersSnapshot =
+            await _orders.get().timeout(AppDurations.dashboardTimeout);
+        _dashboardLog('Orders query result count=${ordersSnapshot.docs.length}');
+
+        _dashboardLog('Revenue query start fields=$_revenueFields');
+        final analytics = _analyticsFromOrdersSnapshot(
+          ordersSnapshot,
+          selectedDate: selectedDate,
+          nextDate: nextDate,
+        );
+        _dashboardLog(
+          'Revenue query result count=${ordersSnapshot.docs.length} '
+          'revenue=${analytics.revenue} '
+          'selectedDateRevenue=${analytics.selectedDateRevenue}',
         );
 
-        final allSnapshot = await allOrders
-            .aggregate(count(), sum('total'))
-            .get()
-            .timeout(AppDurations.networkTimeout);
-        final pendingSnapshot = await pendingOrders
-            .count()
-            .get()
-            .timeout(AppDurations.networkTimeout);
-        final deliveredSnapshot = await deliveredOrders
-            .count()
-            .get()
-            .timeout(AppDurations.networkTimeout);
-
-        return OrderAnalytics(
-          totalOrders: allSnapshot.count ?? 0,
-          revenue: allSnapshot.getSum('total') ?? 0,
-          pendingOrders: pendingSnapshot.count ?? 0,
-          deliveredOrders: deliveredSnapshot.count ?? 0,
-        );
+        return analytics;
       },
     );
   }
@@ -226,20 +300,23 @@ class FirestoreOrderRepository implements OrderRepository {
     required String paymentMethod,
   }) async {
     return createOrder(
-      CreateOrderRequest(
-        userId: userId,
-        userName: customerName,
-        phone: '',
-        address: address,
-        pincode: '',
-        items: cartItems.map(_cartItemToOrderItem).toList(),
-        totalAmount: total,
-        totalSavings: cartItems.fold<double>(
-          0,
-          (runningTotal, item) => runningTotal + item.lineSavings,
-        ),
-        paymentMethod: paymentMethod,
-      ),
+      () {
+        final pricing = CartPricingSummary.fromCartItems(cartItems);
+        return CreateOrderRequest(
+          userId: userId,
+          userName: customerName,
+          phone: '',
+          address: address,
+          pincode: '',
+          items: cartItems.map(_cartItemToOrderItem).toList(),
+          originalAmount: pricing.originalAmount,
+          cartDiscount: pricing.cartDiscount,
+          deliveryFee: pricing.deliveryFee,
+          totalAmount: pricing.finalPayable,
+          totalSavings: pricing.totalSavings,
+          paymentMethod: paymentMethod,
+        );
+      }(),
     );
   }
 
@@ -306,6 +383,13 @@ class FirestoreOrderRepository implements OrderRepository {
     required CreateOrderRequest request,
     required String userId,
   }) {
+    final originalAmount = request.originalAmount > 0
+        ? request.originalAmount
+        : request.items.fold<double>(
+            0,
+            (total, item) => total + item.lineTotal,
+          );
+
     return {
       'orderId': orderId,
       'userId': userId,
@@ -315,9 +399,13 @@ class FirestoreOrderRepository implements OrderRepository {
       'address': request.address.trim(),
       'pincode': request.pincode.trim(),
       'items': request.items.map(_orderItemToMap).toList(),
+      'originalAmount': originalAmount,
+      'cartDiscount': request.cartDiscount,
+      'deliveryFee': request.deliveryFee,
       'totalAmount': request.totalAmount,
       'total': request.totalAmount,
       'totalSavings': request.totalSavings,
+      'searchTokens': _orderSearchTokens(orderId),
       'status': OrderStatus.placed,
       'paymentMethod': request.paymentMethod,
       'createdAt': FieldValue.serverTimestamp(),
@@ -352,6 +440,94 @@ class FirestoreOrderRepository implements OrderRepository {
     return limit > _maxPageLimit ? _maxPageLimit : limit;
   }
 
+  OrderAnalytics _analyticsFromOrdersSnapshot(
+    QuerySnapshot<Map<String, dynamic>> snapshot, {
+    required DateTime selectedDate,
+    required DateTime nextDate,
+  }) {
+    var totalOrders = 0;
+    var pendingOrders = 0;
+    var deliveredOrders = 0;
+    var selectedDateOrders = 0;
+    var revenue = 0.0;
+    var selectedDateRevenue = 0.0;
+    var missingDateCount = 0;
+    var missingRevenueCount = 0;
+
+    for (final doc in snapshot.docs) {
+      totalOrders += 1;
+      final data = doc.data();
+      final status = OrderStatus.normalize(data['status']?.toString());
+      if (status == OrderStatus.delivered) {
+        deliveredOrders += 1;
+      } else if (status == OrderStatus.placed ||
+          status == OrderStatus.packed ||
+          status == OrderStatus.outForDelivery) {
+        pendingOrders += 1;
+      }
+
+      final amount = _readOrderRevenue(data);
+      if (amount == null) {
+        missingRevenueCount += 1;
+      } else {
+        revenue += amount;
+      }
+
+      final orderDate = _readOrderDate(data);
+      if (orderDate == null) {
+        missingDateCount += 1;
+        continue;
+      }
+
+      if (!_dateOnly(orderDate).isBefore(selectedDate) &&
+          orderDate.isBefore(nextDate)) {
+        selectedDateOrders += 1;
+        selectedDateRevenue += amount ?? 0;
+      }
+    }
+
+    if (missingDateCount > 0 || missingRevenueCount > 0) {
+      _dashboardLog(
+        'Order analytics schema gaps missingDate=$missingDateCount '
+        'missingRevenue=$missingRevenueCount',
+      );
+    }
+
+    return OrderAnalytics(
+      totalOrders: totalOrders,
+      revenue: revenue,
+      pendingOrders: pendingOrders,
+      deliveredOrders: deliveredOrders,
+      selectedDate: selectedDate,
+      selectedDateOrders: selectedDateOrders,
+      selectedDateRevenue: selectedDateRevenue,
+    );
+  }
+
+  static double? _readOrderRevenue(Map<String, dynamic> data) {
+    for (final field in _revenueFields) {
+      final amount = _readNumericAmount(data[field]);
+      if (amount != null) return amount < 0 ? 0 : amount;
+    }
+    return null;
+  }
+
+  static double? _readNumericAmount(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    final text = value.toString().trim();
+    if (text.isEmpty) return null;
+    return double.tryParse(text);
+  }
+
+  static DateTime? _readOrderDate(Map<String, dynamic> data) {
+    for (final field in _dateFields) {
+      final date = readDateTime(data[field]);
+      if (date != null) return date;
+    }
+    return null;
+  }
+
   Order _fromDocument(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
 
@@ -369,6 +545,9 @@ class FirestoreOrderRepository implements OrderRepository {
         data['totalAmount'] ?? data['total'],
       ),
       totalSavings: readDouble(data['totalSavings']),
+      originalAmount: readDouble(data['originalAmount']),
+      cartDiscount: readDouble(data['cartDiscount']),
+      deliveryFee: readDouble(data['deliveryFee']),
       address: readString(data, 'address', fallback: 'No address added'),
       pincode: readString(data, 'pincode'),
       status: OrderStatus.normalize(data['status']?.toString()),
@@ -419,5 +598,76 @@ class FirestoreOrderRepository implements OrderRepository {
       'lineTotal': item.lineTotal,
       'lineSavings': item.lineSavings,
     };
+  }
+
+  static DateTime _dateOnly(DateTime date) {
+    final localDate = date.toLocal();
+    return DateTime(localDate.year, localDate.month, localDate.day);
+  }
+
+  static void _dashboardLog(String message) {
+    if (!_debugLoggingEnabled) return;
+    developer.log(message, name: _dashboardLogName);
+  }
+
+  static Set<String> _candidateOrderIds(String query) {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return const <String>{};
+    return {
+      trimmed,
+      trimmed.toUpperCase(),
+    };
+  }
+
+  static String _searchTokenFor(String query) {
+    return query.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  static List<String> _orderSearchTokens(String orderId) {
+    final normalized = orderId.trim().toLowerCase();
+    final compact = normalized.replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final tokens = <String>{
+      if (normalized.length >= 3) normalized,
+      if (compact.length >= 3) compact,
+      for (final part in normalized.split(RegExp(r'[^a-z0-9]+')))
+        if (part.length >= 3) part,
+    };
+
+    void addPrefixes(String value) {
+      final maxLength = value.length > 20 ? 20 : value.length;
+      for (var length = 3; length <= maxLength; length += 1) {
+        tokens.add(value.substring(0, length));
+        if (tokens.length >= _maxOrderSearchTokens) return;
+      }
+    }
+
+    void addSuffixes(String value) {
+      final maxLength = value.length > 20 ? 20 : value.length;
+      for (var length = 3; length <= maxLength; length += 1) {
+        tokens.add(value.substring(value.length - length));
+        if (tokens.length >= _maxOrderSearchTokens) return;
+      }
+    }
+
+    void addSubstrings(String value) {
+      for (var start = 0; start < value.length; start += 1) {
+        for (var length = 3; length <= 8; length += 1) {
+          final end = start + length;
+          if (end > value.length) break;
+          tokens.add(value.substring(start, end));
+          if (tokens.length >= _maxOrderSearchTokens) return;
+        }
+      }
+    }
+
+    for (final value in {normalized, compact}) {
+      if (value.length < 3) continue;
+      addPrefixes(value);
+      addSuffixes(value);
+      addSubstrings(value);
+      if (tokens.length >= _maxOrderSearchTokens) break;
+    }
+
+    return tokens.take(_maxOrderSearchTokens).toList();
   }
 }

@@ -7,6 +7,7 @@ import '../../core/errors/app_error_handler.dart';
 import '../../core/notifications/notification_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../domain/entities/cart_item.dart';
+import '../../domain/entities/cart_pricing.dart';
 import '../../domain/entities/order.dart';
 import '../providers/auth_providers.dart';
 import '../providers/commerce_providers.dart';
@@ -62,8 +63,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     }
 
     final cartItems = ref.watch(cartItemsProvider);
-    final total = ref.watch(cartTotalProvider);
-    final savings = ref.watch(cartSavingsProvider);
+    final pricing = ref.watch(cartPricingSummaryProvider);
     final orderCreationState = ref.watch(orderCreationControllerProvider);
     final isLoading = orderCreationState.isLoading;
 
@@ -101,15 +101,13 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     ),
                   ),
                   _CheckoutSummary(
-                    total: total,
-                    savings: savings,
+                    pricing: pricing,
                     isLoading: isLoading,
                     onPlaceOrder: () {
                       _placeOrder(
                         userId: session.uid,
                         cartItems: cartItems,
-                        total: total,
-                        savings: savings,
+                        pricing: pricing,
                       );
                     },
                   ),
@@ -122,8 +120,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   Future<void> _placeOrder({
     required String userId,
     required List<CartItem> cartItems,
-    required double total,
-    required double savings,
+    required CartPricingSummary pricing,
   }) async {
     if (ref.read(orderCreationControllerProvider).isLoading) return;
     if (formKey.currentState?.validate() != true || cartItems.isEmpty) return;
@@ -135,8 +132,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       address: addressController.text.trim(),
       pincode: pincodeController.text.trim(),
       items: cartItems.map(_toOrderItem).toList(),
-      totalAmount: total,
-      totalSavings: savings,
+      originalAmount: pricing.originalAmount,
+      cartDiscount: pricing.cartDiscount,
+      deliveryFee: pricing.deliveryFee,
+      totalAmount: pricing.finalPayable,
+      totalSavings: pricing.totalSavings,
     );
 
     try {
@@ -488,14 +488,12 @@ class _CheckoutSection extends StatelessWidget {
 
 class _CheckoutSummary extends StatelessWidget {
   const _CheckoutSummary({
-    required this.total,
-    required this.savings,
+    required this.pricing,
     required this.isLoading,
     required this.onPlaceOrder,
   });
 
-  final double total;
-  final double savings;
+  final CartPricingSummary pricing;
   final bool isLoading;
   final VoidCallback onPlaceOrder;
 
@@ -517,15 +515,41 @@ class _CheckoutSummary extends StatelessWidget {
       child: Column(
         children: [
           _SummaryRow(
-            label: CheckoutText.total,
-            value: '\u20B9${_formatPrice(total)}',
-            isBold: true,
+            label: CheckoutText.originalAmount,
+            value: '\u20B9${_formatPrice(pricing.originalAmount)}',
           ),
           const SizedBox(height: 6),
           _SummaryRow(
-            label: CheckoutText.savings,
-            value: '\u20B9${_formatPrice(savings)}',
+            label: CheckoutText.cartDiscount,
+            value: pricing.cartDiscount > 0
+                ? '-\u20B9${_formatPrice(pricing.cartDiscount)}'
+                : '\u20B90',
             valueColor: AppColors.primary,
+          ),
+          const SizedBox(height: 6),
+          _SummaryRow(
+            label: CheckoutText.deliveryFee,
+            value: pricing.deliveryFee > 0
+                ? '\u20B9${_formatPrice(pricing.deliveryFee)}'
+                : CheckoutText.free,
+            valueColor: pricing.deliveryFee > 0 ? null : AppColors.primary,
+          ),
+          if (pricing.totalSavings > 0) ...[
+            const SizedBox(height: 6),
+            _SummaryRow(
+              label: CheckoutText.totalSavings,
+              value: '\u20B9${_formatPrice(pricing.totalSavings)}',
+              valueColor: AppColors.primary,
+            ),
+          ],
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Divider(height: 1, color: AppColors.border),
+          ),
+          _SummaryRow(
+            label: CheckoutText.finalPayable,
+            value: '\u20B9${_formatPrice(pricing.finalPayable)}',
+            isBold: true,
           ),
           const SizedBox(height: 14),
           SizedBox(
@@ -612,8 +636,12 @@ class CheckoutText {
   static const pincode = 'Pincode';
   static const payment = 'Payment';
   static const cashOnDelivery = 'Cash on Delivery';
-  static const total = 'Total';
-  static const savings = 'Total Savings';
+  static const originalAmount = 'Original Amount';
+  static const cartDiscount = 'Cart Discount';
+  static const deliveryFee = 'Delivery Fee';
+  static const totalSavings = 'Total Savings';
+  static const finalPayable = 'Final Payable';
+  static const free = 'Free';
   static const placeOrder = 'Place Order';
   static const placeOrderError = 'Unable to place order';
   static const requiredField = 'Required';

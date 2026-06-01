@@ -1,8 +1,7 @@
-import 'dart:typed_data';
-
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/constants/app_constants.dart';
@@ -199,15 +198,14 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         uid: session.uid,
         existingPhotoUrl: currentUser?.photoUrl ?? '',
       );
+      final phone = _normalizedPhone(_phoneController.text);
 
       await ref.read(userRepositoryProvider).upsertUser(
             AppUser(
               uid: session.uid,
               name: _nameController.text.trim(),
               email: _emailController.text.trim(),
-              phone: currentUser?.phone.trim().isNotEmpty == true
-                  ? currentUser!.phone.trim()
-                  : session.phoneNumber ?? '',
+              phone: phone,
               address: currentUser?.address ?? '',
               addresses: currentUser?.addresses ?? const <String>[],
               photoUrl: photoUrl,
@@ -271,6 +269,13 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.webp')) return 'image/webp';
     return EditProfileConfig.defaultImageContentType;
+  }
+
+  static String _normalizedPhone(String value) {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length == 10) return '+91$digits';
+    if (digits.length == 12 && digits.startsWith('91')) return '+$digits';
+    return value.trim();
   }
 }
 
@@ -438,10 +443,14 @@ class _ProfileFormCard extends StatelessWidget {
           const SizedBox(height: 14),
           TextFormField(
             controller: phoneController,
-            readOnly: true,
+            keyboardType: TextInputType.phone,
+            validator: _phoneValidator,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9+\s-]')),
+            ],
             decoration: const InputDecoration(
               labelText: EditProfileText.phone,
-              helperText: EditProfileText.phoneLocked,
+              helperText: EditProfileText.phoneHelp,
               prefixIcon: Icon(Icons.phone_outlined),
             ),
           ),
@@ -462,6 +471,19 @@ class _ProfileFormCard extends StatelessWidget {
 
     final isValid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(trimmed);
     return isValid ? null : EditProfileText.invalidEmail;
+  }
+
+  String? _phoneValidator(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return null;
+
+    final digits = trimmed.replaceAll(RegExp(r'\D'), '');
+    final localNumber = digits.length == 12 && digits.startsWith('91')
+        ? digits.substring(2)
+        : digits;
+    final isValid = RegExp(r'^[6-9]\d{9}$').hasMatch(localNumber);
+
+    return isValid ? null : EditProfileText.invalidPhone;
   }
 }
 
@@ -515,9 +537,10 @@ class EditProfileText {
   static const name = 'Name';
   static const email = 'Email';
   static const phone = 'Phone';
-  static const phoneLocked = 'Phone number cannot be changed here.';
+  static const phoneHelp = 'Use a 10-digit mobile number or +91 format.';
   static const requiredField = 'Required';
   static const invalidEmail = 'Enter a valid email';
+  static const invalidPhone = 'Enter a valid 10-digit mobile number';
   static const save = 'Save Profile';
   static const saving = 'Saving...';
   static const saveSuccess = 'Profile updated';

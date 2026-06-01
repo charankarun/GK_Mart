@@ -201,52 +201,40 @@ class _BrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       width: size,
       height: size,
-      decoration: BoxDecoration(
-        color: AppColors.primary,
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.24),
-            blurRadius: 28,
-            offset: const Offset(0, 14),
-          ),
-        ],
-      ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Text(
-            'GK',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: size * 0.42,
-              height: 1,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0,
+      child: Image.asset(
+        AppAssets.logo,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+        errorBuilder: (_, __, ___) {
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withValues(alpha: 0.24),
+                  blurRadius: 28,
+                  offset: const Offset(0, 14),
+                ),
+              ],
             ),
-          ),
-          Positioned(
-            top: size * 0.16,
-            right: size * 0.16,
-            child: Container(
-              width: size * 0.25,
-              height: size * 0.25,
-              decoration: BoxDecoration(
-                color: AppColors.accent,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              child: Icon(
-                Icons.eco_rounded,
-                color: Colors.white,
-                size: size * 0.15,
+            child: Center(
+              child: Text(
+                'GK',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: size * 0.42,
+                  height: 1,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0,
+                ),
               ),
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

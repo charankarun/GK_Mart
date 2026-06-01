@@ -1,17 +1,74 @@
+import 'dart:developer' as developer;
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/product_image_upload.dart';
 import '../../domain/entities/product_page.dart';
 import 'repository_providers.dart';
 
+final dashboardInventoryStatsProvider =
+    FutureProvider.autoDispose<DashboardInventoryStats>((ref) async {
+  _dashboardLog(
+    'Inventory query start limit=${ProductProviderConfig.inventoryStatsLimit}',
+  );
+  try {
+    final page = await ref
+        .watch(productRepositoryProvider)
+        .fetchProductsPage(limit: ProductProviderConfig.inventoryStatsLimit)
+        .timeout(AppDurations.dashboardTimeout);
+    _dashboardLog('Inventory query result count=${page.products.length}');
+    return DashboardInventoryStats.fromProducts(page.products);
+  } catch (error, stackTrace) {
+    _dashboardLog(
+      'Riverpod dashboardInventoryStatsProvider exception',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    Error.throwWithStackTrace(error, stackTrace);
+  }
+});
+
 final adminProductListProvider = StateNotifierProvider.autoDispose<
     AdminProductListController, AsyncValue<AdminProductListState>>((ref) {
   return AdminProductListController(ref)..loadInitial();
 });
+
+class DashboardInventoryStats {
+  const DashboardInventoryStats({
+    required this.totalProducts,
+    required this.availableProducts,
+    required this.outOfStockProducts,
+    required this.lowStockProducts,
+  });
+
+  final int totalProducts;
+  final int availableProducts;
+  final int outOfStockProducts;
+  final int lowStockProducts;
+
+  factory DashboardInventoryStats.fromProducts(Iterable<Product> products) {
+    var totalProducts = 0;
+    var availableProducts = 0;
+    var lowStockProducts = 0;
+
+    for (final product in products) {
+      totalProducts += 1;
+      if (product.isAvailable && !product.isStockEmpty) availableProducts += 1;
+      if (product.isLowStock) lowStockProducts += 1;
+    }
+
+    return DashboardInventoryStats(
+      totalProducts: totalProducts,
+      availableProducts: availableProducts,
+      outOfStockProducts: totalProducts - availableProducts,
+      lowStockProducts: lowStockProducts,
+    );
+  }
+}
 
 class AdminProductListController
     extends StateNotifier<AsyncValue<AdminProductListState>> {
@@ -19,18 +76,34 @@ class AdminProductListController
 
   final Ref _ref;
   bool _isSavingProduct = false;
+  String _searchQuery = '';
 
-  Future<void> loadInitial() async {
+  Future<void> loadInitial({String? searchQuery}) async {
+    if (searchQuery != null) _searchQuery = searchQuery.trim();
     state = const AsyncLoading();
 
     try {
-      final page = await _ref.read(productRepositoryProvider).fetchProductsPage(
-            limit: ProductProviderConfig.pageSize,
-          );
-      state = AsyncData(AdminProductListState.fromPage(page));
+      final repository = _ref.read(productRepositoryProvider);
+      final page = _searchQuery.isEmpty
+          ? await repository.fetchProductsPage(
+              limit: ProductProviderConfig.pageSize,
+            )
+          : await repository.fetchProductSearchPage(
+              query: _searchQuery,
+              limit: ProductProviderConfig.pageSize,
+            );
+      state = AsyncData(
+        AdminProductListState.fromPage(page).copyWith(
+          searchQuery: _searchQuery,
+        ),
+      );
     } catch (error, stackTrace) {
       state = AsyncError(error, stackTrace);
     }
+  }
+
+  Future<void> search(String query) {
+    return loadInitial(searchQuery: query);
   }
 
   Future<void> loadNext() async {
@@ -44,14 +117,21 @@ class AdminProductListController
     state = AsyncData(currentState.copyWith(isLoadingMore: true));
 
     try {
-      final page = await _ref.read(productRepositoryProvider).fetchProductsPage(
-            limit: ProductProviderConfig.pageSize,
-            cursor: currentState.nextCursor,
-          );
+      final repository = _ref.read(productRepositoryProvider);
+      final page = _searchQuery.isEmpty
+          ? await repository.fetchProductsPage(
+              limit: ProductProviderConfig.pageSize,
+              cursor: currentState.nextCursor,
+            )
+          : await repository.fetchProductSearchPage(
+              query: _searchQuery,
+              limit: ProductProviderConfig.pageSize,
+              cursor: currentState.nextCursor,
+            );
 
       state = AsyncData(
         currentState.copyWith(
-          products: [...currentState.products, ...page.products],
+          products: _mergeProducts(currentState.products, page.products),
           nextCursor: page.nextCursor,
           hasMore: page.hasMore,
           isLoadingMore: false,
@@ -81,6 +161,8 @@ class AdminProductListController
         imageUrl: imageUrl,
         isAvailable: input.isAvailable,
         unit: input.unit,
+        barcode: input.barcode,
+        brand: input.brand,
         stockQuantity: input.stockQuantity,
         lowStockThreshold: input.lowStockThreshold,
       );
@@ -146,6 +228,59 @@ class AdminProductListController
     }
   }
 
+  Future<void> updateStock({
+    required String productId,
+    required int stockQuantity,
+  }) async {
+    if (stockQuantity < 0) {
+      throw ArgumentError.value(
+        stockQuantity,
+        'stockQuantity',
+        'Must not be negative',
+      );
+    }
+
+    final currentState = _currentState;
+    if (currentState == null) return;
+    if (currentState.pendingStockProductIds.contains(productId)) return;
+
+    final optimisticState = currentState
+        .replaceProduct(
+      productId,
+      (product) => product.copyWith(
+        stockQuantity: stockQuantity,
+        isAvailable: stockQuantity > 0,
+      ),
+    )
+        .copyWith(
+      pendingStockProductIds: {
+        ...currentState.pendingStockProductIds,
+        productId,
+      },
+    );
+    state = AsyncData(optimisticState);
+
+    try {
+      await _ref.read(productRepositoryProvider).updateProductStock(
+            productId: productId,
+            stockQuantity: stockQuantity,
+          );
+      final latestState = _currentState;
+      if (latestState == null) return;
+      state = AsyncData(
+        latestState.copyWith(
+          pendingStockProductIds: {
+            for (final pendingProductId in latestState.pendingStockProductIds)
+              if (pendingProductId != productId) pendingProductId,
+          },
+        ),
+      );
+    } catch (_) {
+      state = AsyncData(currentState);
+      rethrow;
+    }
+  }
+
   Future<void> deleteProduct(String productId) async {
     final currentState = _currentState;
     if (currentState == null) return;
@@ -197,6 +332,19 @@ class AdminProductListController
   }
 }
 
+List<Product> _mergeProducts(
+  List<Product> currentProducts,
+  List<Product> nextProducts,
+) {
+  final productsById = <String, Product>{
+    for (final product in currentProducts) product.id: product,
+  };
+  for (final product in nextProducts) {
+    productsById[product.id] = product;
+  }
+  return productsById.values.toList();
+}
+
 class AdminProductListState {
   const AdminProductListState({
     required this.products,
@@ -204,7 +352,9 @@ class AdminProductListState {
     this.nextCursor,
     this.isLoadingMore = false,
     this.pendingAvailabilityProductIds = const <String>{},
+    this.pendingStockProductIds = const <String>{},
     this.pendingDeleteProductIds = const <String>{},
+    this.searchQuery = '',
   });
 
   final List<Product> products;
@@ -212,7 +362,9 @@ class AdminProductListState {
   final bool hasMore;
   final bool isLoadingMore;
   final Set<String> pendingAvailabilityProductIds;
+  final Set<String> pendingStockProductIds;
   final Set<String> pendingDeleteProductIds;
+  final String searchQuery;
 
   factory AdminProductListState.fromPage(ProductPage page) {
     return AdminProductListState(
@@ -228,7 +380,9 @@ class AdminProductListState {
     bool? hasMore,
     bool? isLoadingMore,
     Set<String>? pendingAvailabilityProductIds,
+    Set<String>? pendingStockProductIds,
     Set<String>? pendingDeleteProductIds,
+    String? searchQuery,
   }) {
     return AdminProductListState(
       products: products ?? this.products,
@@ -237,8 +391,11 @@ class AdminProductListState {
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       pendingAvailabilityProductIds:
           pendingAvailabilityProductIds ?? this.pendingAvailabilityProductIds,
+      pendingStockProductIds:
+          pendingStockProductIds ?? this.pendingStockProductIds,
       pendingDeleteProductIds:
           pendingDeleteProductIds ?? this.pendingDeleteProductIds,
+      searchQuery: searchQuery ?? this.searchQuery,
     );
   }
 
@@ -264,6 +421,8 @@ class AdminProductInput {
     required this.existingImageUrl,
     required this.isAvailable,
     required this.unit,
+    required this.barcode,
+    required this.brand,
     required this.trackStock,
     required this.stockQuantity,
     required this.lowStockThreshold,
@@ -281,6 +440,8 @@ class AdminProductInput {
   final String existingImageUrl;
   final bool isAvailable;
   final String unit;
+  final String barcode;
+  final String brand;
   final bool trackStock;
   final int? stockQuantity;
   final int lowStockThreshold;
@@ -295,6 +456,24 @@ class ProductProviderConfig {
   const ProductProviderConfig._();
 
   static const pageSize = 20;
+  static const inventoryStatsLimit = 60;
   static const imageFileName = 'product_image.jpg';
   static const defaultImageContentType = 'image/jpeg';
+}
+
+const _dashboardLogName = 'AdminDashboard';
+const _debugLoggingEnabled = !bool.fromEnvironment('dart.vm.product');
+
+void _dashboardLog(
+  String message, {
+  Object? error,
+  StackTrace? stackTrace,
+}) {
+  if (!_debugLoggingEnabled) return;
+  developer.log(
+    message,
+    name: _dashboardLogName,
+    error: error,
+    stackTrace: stackTrace,
+  );
 }

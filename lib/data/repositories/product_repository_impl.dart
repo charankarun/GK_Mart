@@ -227,6 +227,14 @@ class ProductRepositoryImpl implements ProductRepository {
           return const ProductPage(products: <Product>[], hasMore: false);
         }
 
+        final barcodePage = await _fetchBarcodeExactPage(
+          query: query.trim(),
+          limit: safeLimit,
+        );
+        if (barcodePage.products.isNotEmpty) {
+          return barcodePage;
+        }
+
         final cursorSource = cursor?.source;
         if (cursorSource == _searchSourceTokens) {
           try {
@@ -347,6 +355,35 @@ class ProductRepositoryImpl implements ProductRepository {
       action: () {
         return _products.doc(normalizedProductId).update({
           ProductField.isAvailable: isAvailable,
+          ProductField.updatedAt: FieldValue.serverTimestamp(),
+        }).timeout(AppDurations.networkTimeout);
+      },
+    );
+  }
+
+  @override
+  Future<void> updateProductStock({
+    required String productId,
+    required int stockQuantity,
+  }) {
+    final normalizedProductId = productId.trim();
+    if (normalizedProductId.isEmpty) {
+      throw ArgumentError.value(productId, 'productId', 'Required');
+    }
+    if (stockQuantity < 0) {
+      throw ArgumentError.value(
+        stockQuantity,
+        'stockQuantity',
+        'Must not be negative',
+      );
+    }
+
+    return RepositoryGuard.run(
+      message: 'Unable to update stock quantity.',
+      action: () {
+        return _products.doc(normalizedProductId).update({
+          ProductField.stockQuantity: stockQuantity,
+          ProductField.isAvailable: stockQuantity > 0,
           ProductField.updatedAt: FieldValue.serverTimestamp(),
         }).timeout(AppDurations.networkTimeout);
       },
@@ -485,6 +522,25 @@ class ProductRepositoryImpl implements ProductRepository {
       cursorSource: _searchSourceTokens,
       cursorName: _searchNameCursorValue,
     );
+  }
+
+  Future<ProductPage> _fetchBarcodeExactPage({
+    required String query,
+    required int limit,
+  }) async {
+    final barcode = _barcodeSearchValue(query);
+    if (!RegExp(r'^\d{4,}$').hasMatch(barcode)) {
+      return const ProductPage(products: <Product>[], hasMore: false);
+    }
+
+    final snapshot = await _products
+        .where(ProductField.barcode, isEqualTo: barcode)
+        .limit(limit)
+        .get()
+        .timeout(AppDurations.networkTimeout);
+    final products = snapshot.docs.map(ProductModel.fromFirestore).toList();
+    _cacheProducts(products);
+    return ProductPage(products: products, hasMore: false);
   }
 
   Future<ProductPage> _fetchSearchNamePage({
@@ -641,6 +697,10 @@ class ProductRepositoryImpl implements ProductRepository {
         .toList();
     if (words.isEmpty) return '';
     return words.last;
+  }
+
+  static String _barcodeSearchValue(String query) {
+    return query.trim().replaceAll(RegExp(r'[^0-9A-Za-z]'), '');
   }
 
   static List<String> _legacyNameQueryVariants(String query) {

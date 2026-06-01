@@ -36,6 +36,9 @@ class Order {
     required this.items,
     required this.totalAmount,
     required this.totalSavings,
+    this.originalAmount = 0,
+    this.cartDiscount = 0,
+    this.deliveryFee = 0,
     required this.address,
     this.pincode = '',
     required this.status,
@@ -50,6 +53,9 @@ class Order {
   final List<OrderItem> items;
   final double totalAmount;
   final double totalSavings;
+  final double originalAmount;
+  final double cartDiscount;
+  final double deliveryFee;
   final String address;
   final String pincode;
   final String status;
@@ -59,6 +65,21 @@ class Order {
   String get customerName => userName;
 
   double get total => totalAmount;
+
+  double get itemsAmount {
+    final computedAmount = items.fold<double>(
+      0,
+      (total, item) => total + item.lineTotal,
+    );
+    if (originalAmount > 0) return originalAmount;
+    if (computedAmount > 0) return computedAmount;
+    return totalAmount;
+  }
+
+  double get productSavings {
+    if (totalSavings <= cartDiscount) return 0;
+    return totalSavings - cartDiscount;
+  }
 
   String get customerDisplayName {
     if (userName.trim().isNotEmpty) return userName.trim();
@@ -78,6 +99,9 @@ class CreateOrderRequest {
     required this.items,
     required this.totalAmount,
     required this.totalSavings,
+    this.originalAmount = 0,
+    this.cartDiscount = 0,
+    this.deliveryFee = 0,
     this.paymentMethod = 'COD',
   });
 
@@ -89,6 +113,9 @@ class CreateOrderRequest {
   final List<OrderItem> items;
   final double totalAmount;
   final double totalSavings;
+  final double originalAmount;
+  final double cartDiscount;
+  final double deliveryFee;
   final String paymentMethod;
 }
 

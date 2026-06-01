@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../../domain/entities/cart_item.dart';
+import '../../domain/entities/cart_pricing.dart';
 import '../../domain/entities/product.dart';
 
 final cartControllerProvider =
@@ -32,6 +33,10 @@ final cartSavingsProvider = Provider<double>((ref) {
         0,
         (total, item) => total + item.lineSavings,
       );
+});
+
+final cartPricingSummaryProvider = Provider<CartPricingSummary>((ref) {
+  return CartPricingSummary.fromCartItems(ref.watch(cartItemsProvider));
 });
 
 class CartController extends StateNotifier<List<CartItem>> {

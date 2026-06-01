@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../domain/entities/cart_item.dart';
+import '../../domain/entities/cart_pricing.dart';
 import '../navigation/customer_navigation_scope.dart';
 import '../providers/auth_providers.dart';
 import '../providers/commerce_providers.dart';
@@ -24,8 +25,7 @@ class CartScreen extends ConsumerWidget {
     }
 
     final cartItems = ref.watch(cartItemsProvider);
-    final total = ref.watch(cartTotalProvider);
-    final savings = ref.watch(cartSavingsProvider);
+    final pricing = ref.watch(cartPricingSummaryProvider);
     final cartController = ref.read(cartControllerProvider.notifier);
 
     return Scaffold(
@@ -63,8 +63,7 @@ class CartScreen extends ConsumerWidget {
                     0,
                     (count, item) => count + item.quantity,
                   ),
-                  total: total,
-                  savings: savings,
+                  pricing: pricing,
                   onCheckout: () {
                     Navigator.push(
                       context,
@@ -328,14 +327,12 @@ class _QuantityButton extends StatelessWidget {
 class _CartSummary extends StatelessWidget {
   const _CartSummary({
     required this.itemCount,
-    required this.total,
-    required this.savings,
+    required this.pricing,
     required this.onCheckout,
   });
 
   final int itemCount;
-  final double total;
-  final double savings;
+  final CartPricingSummary pricing;
   final VoidCallback onCheckout;
 
   @override
@@ -364,17 +361,43 @@ class _CartSummary extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             _SummaryRow(
-              label: CartText.totalSavings,
-              value: '\u20B9${_formatPrice(savings)}',
+              label: CartText.originalAmount,
+              value: '\u20B9${_formatPrice(pricing.originalAmount)}',
+            ),
+            if (pricing.productSavings > 0) ...[
+              const SizedBox(height: 8),
+              _SummaryRow(
+                label: CartText.productSavings,
+                value: '-\u20B9${_formatPrice(pricing.productSavings)}',
+                valueColor: AppColors.primaryDark,
+              ),
+            ],
+            const SizedBox(height: 8),
+            _SummaryRow(
+              label: CartText.cartDiscount,
+              value: pricing.cartDiscount > 0
+                  ? '-\u20B9${_formatPrice(pricing.cartDiscount)}'
+                  : '\u20B90',
               valueColor: AppColors.primaryDark,
             ),
+            const SizedBox(height: 8),
+            _SummaryRow(
+              label: CartText.deliveryFee,
+              value: pricing.deliveryFee > 0
+                  ? '\u20B9${_formatPrice(pricing.deliveryFee)}'
+                  : CartText.free,
+              valueColor:
+                  pricing.deliveryFee > 0 ? null : AppColors.primaryDark,
+            ),
+            const SizedBox(height: 8),
+            _DeliveryMessage(isFree: pricing.hasFreeDelivery),
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 12),
               child: Divider(height: 1, color: AppColors.border),
             ),
             _SummaryRow(
-              label: CartText.total,
-              value: '\u20B9${_formatPrice(total)}',
+              label: CartText.finalPayable,
+              value: '\u20B9${_formatPrice(pricing.finalPayable)}',
               isStrong: true,
             ),
             const SizedBox(height: 14),
@@ -396,6 +419,46 @@ class _CartSummary extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _DeliveryMessage extends StatelessWidget {
+  const _DeliveryMessage({required this.isFree});
+
+  final bool isFree;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: isFree ? AppColors.softGreen : AppColors.softOrange,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isFree
+                ? Icons.local_shipping_rounded
+                : Icons.info_outline_rounded,
+            color: isFree ? AppColors.primary : AppColors.accent,
+            size: 17,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              isFree ? CartText.freeDeliveryApplied : CartText.deliveryHint,
+              style: TextStyle(
+                color: isFree ? AppColors.primaryDark : AppColors.accent,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -531,8 +594,14 @@ class CartText {
   static const addItems = 'Add Items';
   static const checkout = 'Proceed to Checkout';
   static const items = 'Items';
-  static const total = 'Total';
-  static const totalSavings = 'Total Savings';
+  static const originalAmount = 'Original Amount';
+  static const productSavings = 'Product Savings';
+  static const cartDiscount = 'Cart Discount';
+  static const deliveryFee = 'Delivery Fee';
+  static const finalPayable = 'Final Payable';
+  static const free = 'Free';
+  static const freeDeliveryApplied = 'Free delivery applied';
+  static const deliveryHint = 'Add items worth \u20B9699 for free delivery';
   static const saved = 'Saved';
   static const remove = 'Remove item';
 }

@@ -21,7 +21,12 @@ abstract class OrderRepository {
     OrderPageCursor? cursor,
   });
 
-  Future<OrderAnalytics> fetchOrderAnalytics();
+  Future<OrderPage> searchAdminOrders({
+    required String query,
+    required int limit,
+  });
+
+  Future<OrderAnalytics> fetchOrderAnalytics({DateTime? date});
 
   Future<String> createOrder(CreateOrderRequest request);
 

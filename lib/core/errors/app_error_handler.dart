@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
@@ -14,7 +15,10 @@ class AppErrorHandler {
   static void initialize() {
     FlutterError.onError = (details) {
       if (kDebugMode) FlutterError.presentError(details);
-      showGlobalError(details.exception);
+      _logFlutterError(details);
+      if (!_isLayoutError(details.exception)) {
+        showGlobalError(details.exception);
+      }
     };
 
     PlatformDispatcher.instance.onError = (error, stackTrace) {
@@ -24,6 +28,7 @@ class AppErrorHandler {
   }
 
   static void report(Object error, StackTrace stackTrace) {
+    _logError('Unhandled async exception', error, stackTrace);
     if (kDebugMode) {
       FlutterError.presentError(
         FlutterErrorDetails(exception: error, stack: stackTrace),
@@ -86,6 +91,11 @@ class AppErrorHandler {
   }
 
   static String messageFor(Object? error, {String? fallback}) {
+    if (kDebugMode) {
+      final debugMessage = _debugMessageFor(error);
+      if (debugMessage != null) return debugMessage;
+    }
+
     if (isPermissionDenied(error)) {
       return fallback ?? 'Unable to complete this action right now.';
     }
@@ -116,6 +126,41 @@ class AppErrorHandler {
     return fallback ?? 'Something went wrong. Please try again.';
   }
 
+  static String? _debugMessageFor(Object? error) {
+    if (error == null) return null;
+
+    if (error is RepositoryException) {
+      final code = error.code == null ? '' : ' (${error.code})';
+      final causeMessage = _debugMessageFor(error.cause);
+      if (causeMessage == null) {
+        return 'RepositoryException$code: ${error.message}';
+      }
+      return 'RepositoryException$code: ${error.message}\nCause: $causeMessage';
+    }
+
+    if (error is FirebaseException) {
+      final message = error.message?.trim();
+      return 'FirebaseException (${error.code}): '
+          '${message == null || message.isEmpty ? error : message}';
+    }
+
+    if (error is TimeoutException ||
+        error is StateError ||
+        error is TypeError ||
+        error is ArgumentError ||
+        error is NoSuchMethodError) {
+      return error.toString();
+    }
+
+    final message = error.toString();
+    if (message.contains('Null check operator used on a null value') ||
+        message.toLowerCase().contains('null')) {
+      return message;
+    }
+
+    return null;
+  }
+
   static String? _firebaseMessage(FirebaseException error) {
     switch (error.code) {
       case 'network-request-failed':
@@ -138,5 +183,32 @@ class AppErrorHandler {
     }
 
     return null;
+  }
+
+  static bool _isLayoutError(Object? error) {
+    final message = error?.toString() ?? '';
+    return message.contains('A RenderFlex overflowed') ||
+        message.contains('A RenderBox overflowed');
+  }
+
+  static void _logFlutterError(FlutterErrorDetails details) {
+    _logError(
+      details.context?.toDescription() ?? 'Flutter framework exception',
+      details.exception,
+      details.stack,
+    );
+  }
+
+  static void _logError(
+    String message,
+    Object error,
+    StackTrace? stackTrace,
+  ) {
+    developer.log(
+      message,
+      name: 'AppErrorHandler',
+      error: error,
+      stackTrace: stackTrace,
+    );
   }
 }

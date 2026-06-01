@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -44,10 +43,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     _didPrecacheBanner = true;
     precacheImage(
-      const CachedNetworkImageProvider(
-        HomeText.bannerImageUrl,
-        maxWidth: HomeConfig.bannerDiskCacheWidth,
-      ),
+      const AssetImage(HomeText.bannerAsset),
       context,
       onError: (_, __) {},
     );
@@ -129,6 +125,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                       onTap: _openSearchResults,
                     ),
                     _PromoBanner(onShopNow: _scrollToProducts),
+                    const _HomeOfferStrip(),
                     _CategorySection(
                       categoriesAsync: categoriesAsync,
                       onCategorySelected: _openCategoryProducts,
@@ -367,7 +364,11 @@ class _BrandLockup extends StatelessWidget {
             HomeText.logoAsset,
             width: compact ? 34 : 40,
             height: compact ? 34 : 40,
-            fit: BoxFit.cover,
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+            errorBuilder: (_, __, ___) {
+              return const _GkLogoFallback();
+            },
           ),
         ),
         const SizedBox(width: 8),
@@ -442,6 +443,32 @@ class _IconButtonSurface extends StatelessWidget {
             width: 42,
             height: 42,
             child: Icon(icon, color: AppColors.primary, size: 24),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GkLogoFallback extends StatelessWidget {
+  const _GkLogoFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Center(
+        child: Text(
+          'GK',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            height: 1,
+            letterSpacing: 0,
+            fontWeight: FontWeight.w900,
           ),
         ),
       ),
@@ -654,96 +681,104 @@ class _PromoBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 22),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          boxShadow: AppShadows.card,
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          child: Stack(
-            children: [
-              AspectRatio(
-                aspectRatio: 1.9,
-                child: AppCachedNetworkImage(
-                  imageUrl: HomeText.bannerImageUrl,
-                  fit: BoxFit.cover,
-                  filterQuality: FilterQuality.medium,
-                  memCacheWidth: HomeConfig.bannerMemCacheWidth,
-                  maxWidthDiskCache: HomeConfig.bannerDiskCacheWidth,
-                  placeholder: const _BannerImagePlaceholder(),
-                  errorPlaceholder: const _BannerImagePlaceholder(),
-                ),
-              ),
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.white.withValues(alpha: 0.96),
-                        Colors.white.withValues(alpha: 0.76),
-                        Colors.white.withValues(alpha: 0.08),
-                      ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 360;
+
+          return Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadii.lg),
+              boxShadow: AppShadows.card,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadii.lg),
+              child: Stack(
+                children: [
+                  AspectRatio(
+                    aspectRatio: isCompact ? 1.65 : 1.9,
+                    child: Image.asset(
+                      HomeText.bannerAsset,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.high,
+                      cacheWidth: HomeConfig.bannerImageCacheWidth,
+                      errorBuilder: (_, __, ___) {
+                        return const _BannerImagePlaceholder();
+                      },
                     ),
                   ),
-                ),
-              ),
-              Positioned.fill(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 235),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            HomeText.bannerTitle,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: AppColors.text,
-                              fontSize: 22,
-                              height: 1.1,
-                              letterSpacing: 0,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            HomeText.bannerSubtitle,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: AppColors.mutedText,
-                              fontSize: 13,
-                              height: 1.25,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                          SizedBox(
-                            height: 38,
-                            child: ElevatedButton.icon(
-                              onPressed: onShopNow,
-                              icon: const Icon(
-                                Icons.shopping_bag_rounded,
-                                size: 17,
-                              ),
-                              label: const Text(HomeText.shopNow),
-                            ),
-                          ),
-                        ],
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.white.withValues(alpha: 0.98),
+                            Colors.white.withValues(alpha: 0.82),
+                            Colors.white.withValues(alpha: 0.16),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
+                  Positioned.fill(
+                    child: Padding(
+                      padding: EdgeInsets.all(isCompact ? 14 : 18),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: isCompact ? 205 : 235,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                HomeText.bannerTitle,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: AppColors.text,
+                                  fontSize: 21,
+                                  height: 1.1,
+                                  letterSpacing: 0,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const SizedBox(height: 7),
+                              const Text(
+                                HomeText.bannerSubtitle,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: AppColors.mutedText,
+                                  fontSize: 12,
+                                  height: 1.25,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                height: 36,
+                                child: ElevatedButton.icon(
+                                  onPressed: onShopNow,
+                                  icon: const Icon(
+                                    Icons.shopping_bag_rounded,
+                                    size: 17,
+                                  ),
+                                  label: const Text(HomeText.shopNow),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -800,6 +835,131 @@ class _CategorySection extends StatelessWidget {
             onRetry: onRetry,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _HomeOfferStrip extends StatelessWidget {
+  const _HomeOfferStrip();
+
+  static const _offers = [
+    _HomeOffer(
+      title: '\u20B950 OFF',
+      subtitle: 'Above \u20B92000',
+      icon: Icons.local_offer_rounded,
+      color: AppColors.primary,
+    ),
+    _HomeOffer(
+      title: '\u20B9100 OFF',
+      subtitle: 'Above \u20B93000',
+      icon: Icons.savings_rounded,
+      color: AppColors.accent,
+    ),
+    _HomeOffer(
+      title: '\u20B9150 OFF',
+      subtitle: 'Above \u20B94000',
+      icon: Icons.workspace_premium_rounded,
+      color: AppColors.info,
+    ),
+    _HomeOffer(
+      title: 'Free Delivery',
+      subtitle: 'Above \u20B9699',
+      icon: Icons.local_shipping_rounded,
+      color: AppColors.success,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 88,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 22),
+        itemCount: _offers.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          return _OfferCard(offer: _offers[index]);
+        },
+      ),
+    );
+  }
+}
+
+class _HomeOffer {
+  const _HomeOffer({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+}
+
+class _OfferCard extends StatelessWidget {
+  const _OfferCard({required this.offer});
+
+  final _HomeOffer offer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 178,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: offer.color.withValues(alpha: 0.18)),
+        boxShadow: AppShadows.soft,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: offer.color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+            child: Icon(offer.icon, color: offer.color, size: 21),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  offer.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontSize: 14,
+                    height: 1,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  offer.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.mutedText,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1374,8 +1534,7 @@ class HomeConfig {
   static const topOfferLimit = 4;
   static const productsScrollOffset = 560.0;
   static const loadMoreExtent = 520.0;
-  static const bannerMemCacheWidth = 900;
-  static const bannerDiskCacheWidth = 900;
+  static const bannerImageCacheWidth = 1200;
   static const categoryImageCacheExtent = 160;
   static const categoryImageDiskCacheExtent = 220;
 }
@@ -1383,7 +1542,7 @@ class HomeConfig {
 class HomeText {
   const HomeText._();
 
-  static const logoAsset = 'assets/SLV_super_market.png';
+  static const logoAsset = 'assets/gk_mart_logo.png';
   static const supermarket = 'SUPERMARKET';
   static const menu = 'Menu';
   static const notifications = 'Notifications';
@@ -1395,9 +1554,8 @@ class HomeText {
   static const searchHint = 'Search for products...';
   static const clearSearch = 'Clear search';
   static const bannerTitle = 'Best Quality. Best Prices. Everyday!';
-  static const bannerSubtitle = 'Fresh groceries delivered to your door.';
-  static const bannerImageUrl =
-      'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=82';
+  static const bannerSubtitle = 'Groceries, dairy, pooja and home essentials.';
+  static const bannerAsset = 'assets/home_supermarket_banner.png';
   static const shopNow = 'Shop Now';
   static const categoriesTitle = 'Shop by Category';
   static const noCategories = 'No categories available yet';

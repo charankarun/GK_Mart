@@ -21,6 +21,7 @@ dependencies:
   firebase_storage: 13.3.0
   firebase_messaging: 16.1.3
   flutter_local_notifications: ^21.0.0
+  mobile_scanner: ^7.2.0
 
 dev_dependencies:
   flutter_lints: ^5.0.0
@@ -32,6 +33,8 @@ flutter:
 
   assets:
     - assets/SLV_super_market.png
+    - assets/gk_mart_logo.png
+    - assets/home_supermarket_banner.png
 
 # Native splash branding is disabled. The in-app SplashScreen is the single
 # branded startup experience.

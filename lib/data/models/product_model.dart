@@ -13,6 +13,8 @@ class ProductModel extends Product {
     super.imageUrl,
     super.isAvailable,
     super.unit,
+    super.barcode,
+    super.brand,
     super.stockQuantity,
     super.lowStockThreshold,
     super.createdAt,
@@ -29,6 +31,8 @@ class ProductModel extends Product {
       imageUrl: product.imageUrl,
       isAvailable: product.isAvailable,
       unit: product.unit,
+      barcode: product.barcode,
+      brand: product.brand,
       stockQuantity: product.stockQuantity,
       lowStockThreshold: product.lowStockThreshold,
       createdAt: product.createdAt,
@@ -50,6 +54,8 @@ class ProductModel extends Product {
       imageUrl: _readImageUrl(data),
       isAvailable: _readAvailability(data),
       unit: readString(data, ProductField.unit),
+      barcode: readString(data, ProductField.barcode),
+      brand: readString(data, ProductField.brand),
       stockQuantity: _readStockQuantity(data),
       lowStockThreshold: _readLowStockThreshold(data),
       createdAt: readDateTime(data[ProductField.createdAt]),
@@ -70,13 +76,26 @@ class ProductModel extends Product {
         normalizedName,
         categoryId,
         unit,
+        barcode,
+        brand,
       ]),
       ProductField.categoryId: categoryId.trim(),
       ProductField.price: price,
       ProductField.discountPrice: discountPrice,
       ProductField.imageUrl: imageUrl.trim(),
       ProductField.isAvailable: isAvailable,
-      if (unit.trim().isNotEmpty) ProductField.unit: unit.trim(),
+      if (barcode.trim().isNotEmpty)
+        ProductField.barcode: barcode.trim()
+      else if (includeDeletes)
+        ProductField.barcode: FieldValue.delete(),
+      if (brand.trim().isNotEmpty)
+        ProductField.brand: brand.trim()
+      else if (includeDeletes)
+        ProductField.brand: FieldValue.delete(),
+      if (unit.trim().isNotEmpty)
+        ProductField.unit: unit.trim()
+      else if (includeDeletes)
+        ProductField.unit: FieldValue.delete(),
       if (stockQuantity != null) ...{
         ProductField.stockQuantity: stockQuantity,
         ProductField.lowStockThreshold: lowStockThreshold,
@@ -164,6 +183,8 @@ class ProductField {
   static const imageUrl = 'imageUrl';
   static const isAvailable = 'isAvailable';
   static const unit = 'unit';
+  static const barcode = 'barcode';
+  static const brand = 'brand';
   static const stockQuantity = 'stockQuantity';
   static const lowStockThreshold = 'lowStockThreshold';
   static const createdAt = 'createdAt';

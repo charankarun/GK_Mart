@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:firebase_core/firebase_core.dart';
+
+const _debugLoggingEnabled = !bool.fromEnvironment('dart.vm.product');
 
 class RepositoryException implements Exception {
   const RepositoryException(
@@ -27,6 +30,7 @@ class RepositoryGuard {
     try {
       return await action();
     } catch (error, stackTrace) {
+      _logRepositoryError(message, error, stackTrace);
       Error.throwWithStackTrace(_map(error, message), stackTrace);
     }
   }
@@ -38,7 +42,29 @@ class RepositoryGuard {
     try {
       yield* create();
     } catch (error, stackTrace) {
+      _logRepositoryError(message, error, stackTrace);
       Error.throwWithStackTrace(_map(error, message), stackTrace);
+    }
+  }
+
+  static void _logRepositoryError(
+    String message,
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    if (!_debugLoggingEnabled) return;
+
+    developer.log(
+      message,
+      name: 'RepositoryGuard',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    if (error is FirebaseException) {
+      developer.log(
+        'FirebaseException code=${error.code} message=${error.message}',
+        name: 'RepositoryGuard',
+      );
     }
   }
 

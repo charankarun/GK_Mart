@@ -8,6 +8,8 @@ class Product {
     this.imageUrl = '',
     this.isAvailable = true,
     this.unit = '',
+    this.barcode = '',
+    this.brand = '',
     this.stockQuantity,
     this.lowStockThreshold = 5,
     this.createdAt,
@@ -22,6 +24,8 @@ class Product {
   final String imageUrl;
   final bool isAvailable;
   final String unit;
+  final String barcode;
+  final String brand;
   final int? stockQuantity;
   final int lowStockThreshold;
   final DateTime? createdAt;
@@ -60,6 +64,8 @@ class Product {
     bool? isAvailable,
     bool? outOfStock,
     String? unit,
+    String? barcode,
+    String? brand,
     int? stockQuantity,
     bool clearStockQuantity = false,
     int? lowStockThreshold,
@@ -76,6 +82,8 @@ class Product {
       isAvailable:
           isAvailable ?? (outOfStock == null ? this.isAvailable : !outOfStock),
       unit: unit ?? this.unit,
+      barcode: barcode ?? this.barcode,
+      brand: brand ?? this.brand,
       stockQuantity:
           clearStockQuantity ? null : stockQuantity ?? this.stockQuantity,
       lowStockThreshold: lowStockThreshold ?? this.lowStockThreshold,

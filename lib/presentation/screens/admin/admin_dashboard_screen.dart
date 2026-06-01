@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,13 +8,31 @@ import '../../../domain/entities/order.dart';
 import '../../../domain/entities/order_analytics.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/order_providers.dart';
+import '../../providers/product_provider.dart';
 import '../../widgets/app_state_widgets.dart';
 
-class AdminDashboardScreen extends ConsumerWidget {
+class AdminDashboardScreen extends ConsumerStatefulWidget {
   const AdminDashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AdminDashboardScreen> createState() {
+    return _AdminDashboardScreenState();
+  }
+}
+
+class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
+  DateTime _selectedDate = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _dashboardLog(
+      'Dashboard initialization selectedDate=${_selectedDate.toIso8601String()}',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final isAdminAsync = ref.watch(isAdminProvider);
     final isAdmin = isAdminAsync.maybeWhen(
       data: (value) => value,
@@ -21,6 +40,21 @@ class AdminDashboardScreen extends ConsumerWidget {
     );
 
     if (!isAdmin) {
+      if (isAdminAsync.hasError) {
+        return Scaffold(
+          appBar: AppBar(title: const Text(AdminDashboardText.title)),
+          body: AppRetryState(
+            icon: Icons.admin_panel_settings_outlined,
+            title: AdminDashboardText.adminVerificationError,
+            message: AppErrorHandler.messageFor(
+              isAdminAsync.error,
+              fallback: AdminDashboardText.adminVerificationErrorSubtitle,
+            ),
+            onRetry: () => ref.invalidate(isAdminProvider),
+          ),
+        );
+      }
+
       return Scaffold(
         appBar: AppBar(title: const Text(AdminDashboardText.title)),
         body: Center(
@@ -31,8 +65,9 @@ class AdminDashboardScreen extends ConsumerWidget {
       );
     }
 
-    final ordersAsync = ref.watch(ordersStreamProvider);
-    final analyticsAsync = ref.watch(orderAnalyticsProvider);
+    final analyticsAsync = ref.watch(orderAnalyticsProvider(_selectedDate));
+    final recentOrdersAsync = ref.watch(dashboardRecentOrdersProvider);
+    final inventoryStatsAsync = ref.watch(dashboardInventoryStatsProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -40,8 +75,8 @@ class AdminDashboardScreen extends ConsumerWidget {
       body: analyticsAsync.when(
         data: (analytics) {
           final stats = _OrderDashboardStats.fromAnalytics(analytics);
-          final recentOrders = ordersAsync.maybeWhen(
-            data: (orders) => orders.take(4).toList(),
+          final recentOrders = recentOrdersAsync.maybeWhen(
+            data: (orders) => orders,
             orElse: () => const <Order>[],
           );
 
@@ -50,11 +85,34 @@ class AdminDashboardScreen extends ConsumerWidget {
             children: [
               _DashboardHeader(stats: stats),
               const SizedBox(height: 14),
-              _DashboardMetricsGrid(stats: stats),
+              _DashboardDateFilter(
+                selectedDate: _selectedDate,
+                onPickDate: _pickDate,
+              ),
+              const SizedBox(height: 14),
+              _DashboardMetricsGrid(
+                stats: stats,
+                inventoryStatsAsync: inventoryStatsAsync,
+              ),
+              if (inventoryStatsAsync.hasError) ...[
+                const SizedBox(height: 14),
+                AppInlineRetryState(
+                  icon: Icons.inventory_2_outlined,
+                  message: AppErrorHandler.messageFor(
+                    inventoryStatsAsync.error,
+                    fallback: AdminDashboardText.inventoryLoadError,
+                  ),
+                  onRetry: () {
+                    ref.invalidate(dashboardInventoryStatsProvider);
+                  },
+                ),
+              ],
               const SizedBox(height: 14),
               _RecentOrdersPanel(
                 orders: recentOrders,
-                isLoading: ordersAsync.isLoading,
+                isLoading: recentOrdersAsync.isLoading,
+                error: recentOrdersAsync.error,
+                onRetry: () => ref.invalidate(dashboardRecentOrdersProvider),
               ),
             ],
           );
@@ -67,10 +125,24 @@ class AdminDashboardScreen extends ConsumerWidget {
             error,
             fallback: AdminDashboardText.loadErrorSubtitle,
           ),
-          onRetry: () => ref.invalidate(orderAnalyticsProvider),
+          onRetry: () => ref.invalidate(orderAnalyticsProvider(_selectedDate)),
         ),
       ),
     );
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(now.year - 2),
+      lastDate: DateTime(now.year + 1),
+    );
+    if (picked == null || !mounted) return;
+
+    _dashboardLog('Date filter query picked=${picked.toIso8601String()}');
+    setState(() => _selectedDate = picked);
   }
 }
 
@@ -80,12 +152,18 @@ class _OrderDashboardStats {
     required this.deliveredOrders,
     required this.totalRevenue,
     required this.pendingOrders,
+    required this.selectedDate,
+    required this.selectedDateOrders,
+    required this.selectedDateRevenue,
   });
 
   final int totalOrders;
   final int deliveredOrders;
   final double totalRevenue;
   final int pendingOrders;
+  final DateTime selectedDate;
+  final int selectedDateOrders;
+  final double selectedDateRevenue;
 
   factory _OrderDashboardStats.fromAnalytics(OrderAnalytics analytics) {
     return _OrderDashboardStats(
@@ -93,6 +171,9 @@ class _OrderDashboardStats {
       deliveredOrders: analytics.deliveredOrders,
       totalRevenue: analytics.revenue,
       pendingOrders: analytics.pendingOrders,
+      selectedDate: analytics.selectedDate,
+      selectedDateOrders: analytics.selectedDateOrders,
+      selectedDateRevenue: analytics.selectedDateRevenue,
     );
   }
 }
@@ -158,17 +239,107 @@ class _DashboardHeader extends StatelessWidget {
   }
 }
 
-class _DashboardMetricsGrid extends StatelessWidget {
-  const _DashboardMetricsGrid({required this.stats});
+class _DashboardDateFilter extends StatelessWidget {
+  const _DashboardDateFilter({
+    required this.selectedDate,
+    required this.onPickDate,
+  });
 
-  final _OrderDashboardStats stats;
+  final DateTime selectedDate;
+  final VoidCallback onPickDate;
 
   @override
   Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.card,
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        onTap: onPickDate,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: AppColors.border),
+            boxShadow: AppShadows.soft,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.softGreen,
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                ),
+                child: const Icon(
+                  Icons.calendar_month_rounded,
+                  color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      AdminDashboardText.calendarFilter,
+                      style: TextStyle(
+                        color: AppColors.mutedText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      _formatDate(selectedDate),
+                      style: const TextStyle(
+                        color: AppColors.text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.edit_calendar_rounded, color: AppColors.primary),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardMetricsGrid extends StatelessWidget {
+  const _DashboardMetricsGrid({
+    required this.stats,
+    required this.inventoryStatsAsync,
+  });
+
+  final _OrderDashboardStats stats;
+  final AsyncValue<DashboardInventoryStats> inventoryStatsAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    final inventoryStats = inventoryStatsAsync.maybeWhen(
+      data: (stats) => stats,
+      orElse: () => null,
+    );
+    final inventoryValueFallback =
+        inventoryStatsAsync.isLoading ? AdminDashboardText.loadingValue : '--';
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth >= 720 ? 3 : 2;
-        final aspectRatio = constraints.maxWidth >= 720 ? 1.75 : 1.28;
+        final crossAxisCount = constraints.maxWidth >= 720
+            ? 3
+            : constraints.maxWidth < 320
+                ? 1
+                : 2;
+        final textScale = MediaQuery.textScalerOf(context).scale(1);
+        final extraTextHeight = ((textScale - 1) * 28).clamp(0, 36).toDouble();
+        final cardExtent =
+            (constraints.maxWidth >= 720 ? 154.0 : 162.0) + extraTextHeight;
 
         return GridView(
           shrinkWrap: true,
@@ -177,7 +348,7 @@ class _DashboardMetricsGrid extends StatelessWidget {
             crossAxisCount: crossAxisCount,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: aspectRatio,
+            mainAxisExtent: cardExtent,
           ),
           children: [
             _DashboardMetricCard(
@@ -193,6 +364,18 @@ class _DashboardMetricsGrid extends StatelessWidget {
               color: AppColors.primary,
             ),
             _DashboardMetricCard(
+              title: AdminDashboardText.dailyRevenue,
+              value: '\u20B9${_formatPrice(stats.selectedDateRevenue)}',
+              icon: Icons.today_rounded,
+              color: AppColors.success,
+            ),
+            _DashboardMetricCard(
+              title: AdminDashboardText.dailyOrders,
+              value: stats.selectedDateOrders.toString(),
+              icon: Icons.event_available_rounded,
+              color: AppColors.info,
+            ),
+            _DashboardMetricCard(
               title: AdminDashboardText.pendingOrders,
               value: stats.pendingOrders.toString(),
               icon: Icons.pending_actions_rounded,
@@ -203,6 +386,34 @@ class _DashboardMetricsGrid extends StatelessWidget {
               value: stats.deliveredOrders.toString(),
               icon: Icons.task_alt_rounded,
               color: AppColors.primary,
+            ),
+            _DashboardMetricCard(
+              title: AdminDashboardText.totalProducts,
+              value: inventoryStats?.totalProducts.toString() ??
+                  inventoryValueFallback,
+              icon: Icons.inventory_2_rounded,
+              color: AppColors.info,
+            ),
+            _DashboardMetricCard(
+              title: AdminDashboardText.availableProducts,
+              value: inventoryStats?.availableProducts.toString() ??
+                  inventoryValueFallback,
+              icon: Icons.check_circle_rounded,
+              color: AppColors.success,
+            ),
+            _DashboardMetricCard(
+              title: AdminDashboardText.lowStockProducts,
+              value: inventoryStats?.lowStockProducts.toString() ??
+                  inventoryValueFallback,
+              icon: Icons.warning_amber_rounded,
+              color: AppColors.accent,
+            ),
+            _DashboardMetricCard(
+              title: AdminDashboardText.outOfStockProducts,
+              value: inventoryStats?.outOfStockProducts.toString() ??
+                  inventoryValueFallback,
+              icon: Icons.remove_shopping_cart_rounded,
+              color: AppColors.danger,
             ),
           ],
         );
@@ -236,7 +447,6 @@ class _DashboardMetricCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Container(
             width: 42,
@@ -247,32 +457,40 @@ class _DashboardMetricCard extends StatelessWidget {
             ),
             child: Icon(icon, color: color),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              FittedBox(
-                alignment: Alignment.centerLeft,
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  value,
-                  style: const TextStyle(
-                    color: AppColors.text,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
+          const SizedBox(height: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: FittedBox(
+                    alignment: Alignment.centerLeft,
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      value,
+                      style: const TextStyle(
+                        color: AppColors.text,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.mutedText,
-                  fontWeight: FontWeight.w800,
+                const SizedBox(height: 4),
+                Flexible(
+                  child: Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.mutedText,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -284,10 +502,14 @@ class _RecentOrdersPanel extends StatelessWidget {
   const _RecentOrdersPanel({
     required this.orders,
     required this.isLoading,
+    required this.error,
+    required this.onRetry,
   });
 
   final List<Order> orders;
   final bool isLoading;
+  final Object? error;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -316,6 +538,14 @@ class _RecentOrdersPanel extends StatelessWidget {
               padding: EdgeInsets.symmetric(vertical: 8),
               child: LinearProgressIndicator(),
             )
+          else if (error != null)
+            _InlineDashboardRetry(
+              message: AppErrorHandler.messageFor(
+                error,
+                fallback: AdminDashboardText.recentOrdersLoadError,
+              ),
+              onRetry: onRetry,
+            )
           else if (orders.isEmpty)
             const Text(
               AdminDashboardText.noRecentOrders,
@@ -332,6 +562,41 @@ class _RecentOrdersPanel extends StatelessWidget {
             ],
         ],
       ),
+    );
+  }
+}
+
+class _InlineDashboardRetry extends StatelessWidget {
+  const _InlineDashboardRetry({
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Icon(Icons.error_outline_rounded, color: AppColors.mutedText),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            message,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppColors.mutedText,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: onRetry,
+          child: const Text(AdminDashboardText.retry),
+        ),
+      ],
     );
   }
 }
@@ -451,11 +716,25 @@ String _formatPrice(double price) {
   return price % 1 == 0 ? price.toStringAsFixed(0) : price.toStringAsFixed(2);
 }
 
+String _formatDate(DateTime date) {
+  final localDate = date.toLocal();
+  final day = localDate.day.toString().padLeft(2, '0');
+  final month = localDate.month.toString().padLeft(2, '0');
+  return '$day/$month/${localDate.year}';
+}
+
+void _dashboardLog(String message) {
+  if (!kDebugMode) return;
+  debugPrint('[AdminDashboard] $message');
+}
+
 class AdminDashboardText {
   const AdminDashboardText._();
 
   static const title = 'Admin Dashboard';
   static const adminAccessRequired = 'Admin access required';
+  static const adminVerificationError = 'Unable to verify admin access';
+  static const adminVerificationErrorSubtitle = 'Please try again in a moment.';
   static const loadError = 'Unable to load dashboard';
   static const loadErrorSubtitle = 'Please try again in a moment.';
   static const overviewTitle = 'Store overview';
@@ -463,6 +742,17 @@ class AdminDashboardText {
   static const revenue = 'Revenue';
   static const pendingOrders = 'Pending Orders';
   static const deliveredOrders = 'Delivered Orders';
+  static const totalProducts = 'Total Products';
+  static const availableProducts = 'Available Products';
+  static const lowStockProducts = 'Low Stock';
+  static const outOfStockProducts = 'Out Of Stock';
+  static const calendarFilter = 'Calendar Filter';
+  static const dailyRevenue = 'Revenue For Selected Date';
+  static const dailyOrders = 'Orders For Selected Date';
   static const recentOrders = 'Recent Orders';
   static const noRecentOrders = 'No recent orders yet';
+  static const inventoryLoadError = 'Unable to load inventory stats.';
+  static const recentOrdersLoadError = 'Unable to load recent orders.';
+  static const loadingValue = '...';
+  static const retry = 'Retry';
 }

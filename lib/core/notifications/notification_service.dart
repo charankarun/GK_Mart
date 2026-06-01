@@ -335,17 +335,25 @@ class NotificationService {
     if (uid.isEmpty || token.isEmpty) return;
 
     final doc = _tokenDocument(uid, token);
-    final snapshot = await doc.get().timeout(AppDurations.networkTimeout);
-    final now = FieldValue.serverTimestamp();
+    await _firestore.runTransaction<void>((transaction) async {
+      final snapshot = await transaction.get(doc);
+      final data = snapshot.data();
+      final hasCreatedAt = data?.containsKey('createdAt') ?? false;
+      final now = FieldValue.serverTimestamp();
 
-    await doc.set({
-      'token': token,
-      'platform': _platformName,
-      'enabled': true,
-      if (!snapshot.exists) 'createdAt': now,
-      'updatedAt': now,
-      'lastSeenAt': now,
-    }, SetOptions(merge: true)).timeout(AppDurations.networkTimeout);
+      transaction.set(
+        doc,
+        {
+          'token': token,
+          'platform': _platformName,
+          'enabled': true,
+          if (!snapshot.exists || !hasCreatedAt) 'createdAt': now,
+          'updatedAt': now,
+          'lastSeenAt': now,
+        },
+        SetOptions(merge: true),
+      );
+    }).timeout(AppDurations.networkTimeout);
   }
 
   DocumentReference<Map<String, dynamic>> _tokenDocument(

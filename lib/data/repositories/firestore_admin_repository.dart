@@ -43,6 +43,8 @@ class FirestoreAdminRepository implements AdminRepository {
     Map<String, dynamic>? adminConfig;
     Map<String, dynamic>? userProfile;
     bool? lastValue;
+    bool hasEmittedInitialValue = false;
+    Timer? initialLoadTimer;
 
     void emit() {
       if (controller.isClosed) return;
@@ -52,11 +54,20 @@ class FirestoreAdminRepository implements AdminRepository {
       if (lastValue == isAdmin) return;
 
       lastValue = isAdmin;
+      hasEmittedInitialValue = true;
+      initialLoadTimer?.cancel();
       controller.add(isAdmin);
     }
 
     controller = StreamController<bool>(
       onListen: () {
+        initialLoadTimer = Timer(AppDurations.dashboardTimeout, () {
+          if (hasEmittedInitialValue || controller.isClosed) return;
+          controller.addError(
+            TimeoutException('Admin access verification timed out.'),
+          );
+        });
+
         adminConfigSubscription = _adminConfigRef.snapshots().listen(
           (doc) {
             adminConfig = doc.data();
@@ -80,6 +91,7 @@ class FirestoreAdminRepository implements AdminRepository {
         );
       },
       onCancel: () async {
+        initialLoadTimer?.cancel();
         await adminConfigSubscription?.cancel();
         await userProfileSubscription?.cancel();
       },

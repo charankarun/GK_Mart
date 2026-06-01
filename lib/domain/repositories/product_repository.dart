@@ -34,6 +34,11 @@ abstract class ProductRepository {
     required bool isAvailable,
   });
 
+  Future<void> updateProductStock({
+    required String productId,
+    required int stockQuantity,
+  });
+
   Future<String> uploadProductImage(ProductImageUpload upload);
 
   Future<void> deleteProduct(String productId);

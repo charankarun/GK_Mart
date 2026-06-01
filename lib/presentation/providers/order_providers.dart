@@ -1,7 +1,11 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../domain/entities/order.dart';
+import '../../domain/entities/order_analytics.dart';
 import '../../domain/entities/order_page.dart';
 import 'repository_providers.dart';
 
@@ -16,8 +20,57 @@ final ordersStreamProvider = StreamProvider<List<Order>>((ref) {
 
 final adminOrdersProvider = ordersStreamProvider;
 
-final orderAnalyticsProvider = FutureProvider.autoDispose((ref) {
-  return ref.watch(orderRepositoryProvider).fetchOrderAnalytics();
+final orderAnalyticsProvider =
+    FutureProvider.autoDispose.family<OrderAnalytics, DateTime>(
+  (ref, date) async {
+    _dashboardLog(
+      'Riverpod orderAnalyticsProvider start date=${date.toIso8601String()}',
+    );
+    try {
+      final analytics = await ref
+          .watch(orderRepositoryProvider)
+          .fetchOrderAnalytics(date: date)
+          .timeout(AppDurations.dashboardTimeout);
+      _dashboardLog(
+        'Riverpod orderAnalyticsProvider result '
+        'totalOrders=${analytics.totalOrders} '
+        'selectedDateOrders=${analytics.selectedDateOrders}',
+      );
+      return analytics;
+    } catch (error, stackTrace) {
+      _dashboardLog(
+        'Riverpod orderAnalyticsProvider exception',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  },
+);
+
+final dashboardRecentOrdersProvider =
+    FutureProvider.autoDispose<List<Order>>((ref) async {
+  _dashboardLog(
+    'Orders query start dashboardRecentOrders '
+    'limit=${OrderProviderConfig.dashboardRecentOrderLimit}',
+  );
+  try {
+    final page = await ref
+        .watch(orderRepositoryProvider)
+        .fetchAllOrdersPage(
+          limit: OrderProviderConfig.dashboardRecentOrderLimit,
+        )
+        .timeout(AppDurations.dashboardTimeout);
+    _dashboardLog('Orders query result count=${page.orders.length}');
+    return page.orders;
+  } catch (error, stackTrace) {
+    _dashboardLog(
+      'Riverpod dashboardRecentOrdersProvider exception',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    Error.throwWithStackTrace(error, stackTrace);
+  }
 });
 
 final userOrderListProvider = StateNotifierProvider.autoDispose
@@ -201,25 +254,39 @@ class AdminOrderListController
   AdminOrderListController(this._ref) : super(const AsyncLoading());
 
   final Ref _ref;
+  String _searchQuery = '';
 
-  Future<void> loadInitial() async {
+  Future<void> loadInitial({String? searchQuery}) async {
+    if (searchQuery != null) _searchQuery = searchQuery.trim();
     state = const AsyncLoading();
 
     try {
-      final page = await _ref.read(orderRepositoryProvider).fetchAllOrdersPage(
-            limit: OrderProviderConfig.pageSize,
-          );
-      state = AsyncData(OrderListState.fromPage(page));
+      final page = _searchQuery.isEmpty
+          ? await _ref.read(orderRepositoryProvider).fetchAllOrdersPage(
+                limit: OrderProviderConfig.pageSize,
+              )
+          : await _ref.read(orderRepositoryProvider).searchAdminOrders(
+                query: _searchQuery,
+                limit: OrderProviderConfig.pageSize,
+              );
+      state = AsyncData(
+        OrderListState.fromPage(page).copyWith(searchQuery: _searchQuery),
+      );
     } catch (error, stackTrace) {
       state = AsyncError(error, stackTrace);
     }
+  }
+
+  Future<void> search(String query) {
+    return loadInitial(searchQuery: query);
   }
 
   Future<void> loadNext() async {
     final currentState = _currentState;
     if (currentState == null ||
         currentState.isLoadingMore ||
-        !currentState.hasMore) {
+        !currentState.hasMore ||
+        _searchQuery.isNotEmpty) {
       return;
     }
 
@@ -255,12 +322,14 @@ class OrderListState {
     required this.hasMore,
     this.nextCursor,
     this.isLoadingMore = false,
+    this.searchQuery = '',
   });
 
   final List<Order> orders;
   final OrderPageCursor? nextCursor;
   final bool hasMore;
   final bool isLoadingMore;
+  final String searchQuery;
 
   factory OrderListState.fromPage(OrderPage page) {
     return OrderListState(
@@ -275,12 +344,14 @@ class OrderListState {
     OrderPageCursor? nextCursor,
     bool? hasMore,
     bool? isLoadingMore,
+    String? searchQuery,
   }) {
     return OrderListState(
       orders: orders ?? this.orders,
       nextCursor: nextCursor ?? this.nextCursor,
       hasMore: hasMore ?? this.hasMore,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+      searchQuery: searchQuery ?? this.searchQuery,
     );
   }
 
@@ -296,6 +367,7 @@ class OrderListState {
       orders: ordersById.values.toList(),
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
+      searchQuery: searchQuery,
     );
   }
 }
@@ -304,4 +376,22 @@ class OrderProviderConfig {
   const OrderProviderConfig._();
 
   static const pageSize = 20;
+  static const dashboardRecentOrderLimit = 4;
+}
+
+const _dashboardLogName = 'AdminDashboard';
+const _debugLoggingEnabled = !bool.fromEnvironment('dart.vm.product');
+
+void _dashboardLog(
+  String message, {
+  Object? error,
+  StackTrace? stackTrace,
+}) {
+  if (!_debugLoggingEnabled) return;
+  developer.log(
+    message,
+    name: _dashboardLogName,
+    error: error,
+    stackTrace: stackTrace,
+  );
 }

@@ -4,6 +4,7 @@ class AppDurations {
   const AppDurations._();
 
   static const startupTimeout = Duration(seconds: 12);
+  static const dashboardTimeout = Duration(seconds: 8);
   static const networkTimeout = Duration(seconds: 15);
   static const uploadTimeout = Duration(seconds: 45);
   static const splashMinimumDuration = Duration(milliseconds: 1200);
@@ -20,7 +21,7 @@ class AppPadding {
 class AppAssets {
   const AppAssets._();
 
-  static const logo = 'assets/SLV_super_market.png';
+  static const logo = 'assets/gk_mart_logo.png';
 }
 
 class FirestoreCollections {

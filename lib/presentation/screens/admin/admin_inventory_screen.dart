@@ -1,8 +1,12 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/images/image_upload_processor.dart';
@@ -27,7 +31,9 @@ class AdminInventoryScreen extends ConsumerStatefulWidget {
 class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
+  Timer? _searchDebounce;
   String? _selectedCategoryFilterId;
+  String _lastSearchQuery = '';
 
   @override
   void initState() {
@@ -38,6 +44,7 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _scrollController.removeListener(_handleScroll);
     _searchController.removeListener(_handleSearchChanged);
     _scrollController.dispose();
@@ -47,6 +54,17 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
 
   void _handleSearchChanged() {
     if (mounted) setState(() {});
+
+    final query = _searchController.text.trim();
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(
+      ProductManagementConfig.searchDebounceDuration,
+      () {
+        if (!mounted || query == _lastSearchQuery) return;
+        _lastSearchQuery = query;
+        ref.read(adminProductListProvider.notifier).search(query);
+      },
+    );
   }
 
   void _handleScroll() {
@@ -122,6 +140,7 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
         error: (_, __) => _InventoryError(
           onRetry: () {
             ref.read(adminProductListProvider.notifier).loadInitial();
+            _lastSearchQuery = _searchController.text.trim();
           },
         ),
       ),
@@ -177,15 +196,16 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
           }
 
           final product = products[productIndex];
-          final isUpdating = state.pendingAvailabilityProductIds.contains(
-                product.id,
-              ) ||
-              state.pendingDeleteProductIds.contains(product.id);
+          final isUpdating =
+              state.pendingAvailabilityProductIds.contains(product.id) ||
+                  state.pendingStockProductIds.contains(product.id) ||
+                  state.pendingDeleteProductIds.contains(product.id);
           return _ProductCard(
             product: product,
             categoryName: categoriesById[product.categoryId]?.name,
             isUpdating: isUpdating,
             onEdit: () => _openProductForm(product: product),
+            onManageStock: () => _openStockActions(product),
             onDelete: () => _confirmDelete(product),
             onAvailabilityChanged: (isAvailable) {
               _updateAvailability(product, isAvailable);
@@ -197,9 +217,31 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
   }
 
   Future<void> _openProductForm({Product? product}) async {
+    var initialBarcode = '';
+    if (product == null) {
+      final mode = await showDialog<_ProductEntryMode>(
+        context: context,
+        builder: (_) => const _ProductEntryModeDialog(),
+      );
+      if (mode == null || !mounted) return;
+
+      if (mode == _ProductEntryMode.scanBarcode) {
+        final scannedBarcode = await Navigator.of(context).push<String>(
+          MaterialPageRoute(
+            builder: (_) => const _BarcodeScannerScreen(),
+          ),
+        );
+        if (!mounted) return;
+        initialBarcode = scannedBarcode?.trim() ?? '';
+      }
+    }
+
     final input = await showDialog<AdminProductInput>(
       context: context,
-      builder: (_) => _ProductFormDialog(product: product),
+      builder: (_) => _ProductFormDialog(
+        product: product,
+        initialBarcode: initialBarcode,
+      ),
     );
 
     if (input == null || !mounted) return;
@@ -235,16 +277,143 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
       if (query.isEmpty) return true;
 
       return product.name.toLowerCase().contains(query) ||
+          product.barcode.toLowerCase().contains(query) ||
+          product.brand.toLowerCase().contains(query) ||
           product.categoryId.toLowerCase().contains(query) ||
           product.unit.toLowerCase().contains(query);
     }).toList();
   }
 
   void _clearFilters() {
+    _searchDebounce?.cancel();
     setState(() {
       _searchController.clear();
       _selectedCategoryFilterId = null;
     });
+    if (_lastSearchQuery.isNotEmpty) {
+      _lastSearchQuery = '';
+      ref.read(adminProductListProvider.notifier).search('');
+    }
+  }
+
+  Future<void> _openStockActions(Product product) async {
+    final action = await showModalBottomSheet<_StockAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.add_circle_outline),
+                title: const Text(ProductManagementText.increaseStock),
+                onTap: () {
+                  Navigator.pop(sheetContext, _StockAction.increase);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.remove_circle_outline),
+                title: const Text(ProductManagementText.decreaseStock),
+                onTap: () {
+                  Navigator.pop(sheetContext, _StockAction.decrease);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.edit_note_rounded),
+                title: const Text(ProductManagementText.updateStock),
+                onTap: () {
+                  Navigator.pop(sheetContext, _StockAction.update);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (action == null || !mounted) return;
+
+    final quantity = await _promptStockQuantity(product, action);
+    if (quantity == null || !mounted) return;
+
+    final currentQuantity = product.stockQuantity ?? 0;
+    final nextQuantity = switch (action) {
+      _StockAction.increase => currentQuantity + quantity,
+      _StockAction.decrease => currentQuantity - quantity,
+      _StockAction.update => quantity,
+    };
+
+    if (nextQuantity < 0) {
+      _showMessage(ProductManagementText.negativeStockBlocked);
+      return;
+    }
+
+    final confirmed = await _confirmStockUpdate(
+      product: product,
+      currentQuantity: currentQuantity,
+      nextQuantity: nextQuantity,
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await ref.read(adminProductListProvider.notifier).updateStock(
+            productId: product.id,
+            stockQuantity: nextQuantity,
+          );
+      if (!mounted) return;
+      _showMessage(ProductManagementText.stockQuantityUpdateSuccess);
+    } catch (error) {
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: ProductManagementText.stockQuantityUpdateError,
+      );
+    }
+  }
+
+  Future<int?> _promptStockQuantity(
+    Product product,
+    _StockAction action,
+  ) {
+    return showDialog<int>(
+      context: context,
+      builder: (_) => _StockQuantityDialog(
+        action: action,
+        currentQuantity: product.stockQuantity ?? 0,
+      ),
+    );
+  }
+
+  Future<bool?> _confirmStockUpdate({
+    required Product product,
+    required int currentQuantity,
+    required int nextQuantity,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text(ProductManagementText.confirmStockUpdate),
+          content: Text(
+            '${product.name}\n'
+            '${ProductManagementText.currentStock}: $currentQuantity\n'
+            '${ProductManagementText.newStock}: $nextQuantity',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text(ProductManagementText.cancel),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.check_rounded),
+              label: const Text(ProductManagementText.confirm),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _updateAvailability(Product product, bool isAvailable) async {
@@ -337,12 +506,13 @@ class _InventorySummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final availableCount = products.where((product) {
-      return product.isAvailable;
+      return product.isAvailable && !product.isStockEmpty;
     }).length;
-    final outOfStockCount = products.length - availableCount;
+    final outOfStockCount = products.where((product) {
+      return !product.isAvailable || product.isStockEmpty;
+    }).length;
     final lowStockCount =
         products.where((product) => product.isLowStock).length;
-    final topOfferCount = products.where(_hasTopOffer).length;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -373,7 +543,7 @@ class _InventorySummary extends StatelessWidget {
             runSpacing: 10,
             children: [
               _SummaryMetric(
-                label: ProductManagementText.loadedProducts,
+                label: ProductManagementText.totalProducts,
                 value: products.length.toString(),
                 color: AppColors.primary,
               ),
@@ -388,14 +558,9 @@ class _InventorySummary extends StatelessWidget {
                 color: ProductManagementColors.warning,
               ),
               _SummaryMetric(
-                label: ProductManagementText.topOffers,
-                value: topOfferCount.toString(),
-                color: AppColors.accent,
-              ),
-              _SummaryMetric(
                 label: ProductManagementText.outOfStock,
                 value: outOfStockCount.toString(),
-                color: AppColors.accent,
+                color: ProductManagementColors.danger,
               ),
             ],
           ),
@@ -492,6 +657,7 @@ class _InventoryFilters extends StatelessWidget {
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
               labelText: ProductManagementText.searchProducts,
+              hintText: ProductManagementText.searchProductsHint,
               prefixIcon: const Icon(Icons.search_rounded),
               suffixIcon: searchController.text.trim().isEmpty
                   ? null
@@ -570,6 +736,7 @@ class _ProductCard extends StatelessWidget {
     required this.categoryName,
     required this.isUpdating,
     required this.onEdit,
+    required this.onManageStock,
     required this.onDelete,
     required this.onAvailabilityChanged,
   });
@@ -578,12 +745,13 @@ class _ProductCard extends StatelessWidget {
   final String? categoryName;
   final bool isUpdating;
   final VoidCallback onEdit;
+  final VoidCallback onManageStock;
   final VoidCallback onDelete;
   final ValueChanged<bool> onAvailabilityChanged;
 
   @override
   Widget build(BuildContext context) {
-    final availabilityStyle = _AvailabilityStyle.resolve(product.isAvailable);
+    final badgeStyle = _InventoryBadgeStyle.resolve(product);
     final stockStyle = _StockStyle.resolve(product);
     final visibleCategory = categoryName?.trim().isNotEmpty == true
         ? categoryName!.trim()
@@ -602,7 +770,15 @@ class _ProductCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _ProductImage(imageUrl: product.imageUrl),
+            _ProductImage(
+              imageUrl: product.imageUrl,
+              onTap: () {
+                _showProductImagePreview(
+                  context,
+                  imageUrl: product.imageUrl,
+                );
+              },
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -635,9 +811,9 @@ class _ProductCard extends StatelessWidget {
                               background: AppColors.softOrange,
                             ),
                           _ProductMiniChip(
-                            label: availabilityStyle.label,
-                            color: availabilityStyle.foreground,
-                            background: availabilityStyle.background,
+                            label: badgeStyle.label,
+                            color: badgeStyle.foreground,
+                            background: badgeStyle.background,
                           ),
                         ],
                       ),
@@ -648,6 +824,16 @@ class _ProductCard extends StatelessWidget {
                     Text(
                       '${ProductManagementText.categoryPrefix} '
                       '$visibleCategory',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.mutedText),
+                    ),
+                  ],
+                  if (product.barcode.trim().isNotEmpty) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      '${ProductManagementText.barcodePrefix} '
+                      '${product.barcode.trim()}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: AppColors.mutedText),
@@ -686,6 +872,11 @@ class _ProductCard extends StatelessWidget {
                           onChanged: onAvailabilityChanged,
                         ),
                       IconButton(
+                        tooltip: ProductManagementText.manageStock,
+                        onPressed: isUpdating ? null : onManageStock,
+                        icon: const Icon(Icons.inventory_outlined),
+                      ),
+                      IconButton(
                         tooltip: ProductManagementText.editProduct,
                         onPressed: isUpdating ? null : onEdit,
                         icon: const Icon(Icons.edit_outlined),
@@ -709,9 +900,13 @@ class _ProductCard extends StatelessWidget {
 }
 
 class _ProductImage extends StatelessWidget {
-  const _ProductImage({required this.imageUrl});
+  const _ProductImage({
+    required this.imageUrl,
+    required this.onTap,
+  });
 
   final String imageUrl;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -725,17 +920,26 @@ class _ProductImage extends StatelessWidget {
       child: const Icon(Icons.image, color: AppColors.primary),
     );
 
-    return AppCachedNetworkImage(
-      imageUrl: imageUrl,
-      width: ProductManagementConfig.productImageSize,
-      height: ProductManagementConfig.productImageSize,
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      memCacheWidth: ProductManagementConfig.productImageCacheExtent,
-      memCacheHeight: ProductManagementConfig.productImageCacheExtent,
-      maxWidthDiskCache: ProductManagementConfig.productImageDiskCacheExtent,
-      maxHeightDiskCache: ProductManagementConfig.productImageDiskCacheExtent,
-      placeholder: placeholder,
-      errorPlaceholder: placeholder,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        onTap: onTap,
+        child: AppCachedNetworkImage(
+          imageUrl: imageUrl,
+          width: ProductManagementConfig.productImageSize,
+          height: ProductManagementConfig.productImageSize,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          memCacheWidth: ProductManagementConfig.productImageCacheExtent,
+          memCacheHeight: ProductManagementConfig.productImageCacheExtent,
+          maxWidthDiskCache:
+              ProductManagementConfig.productImageDiskCacheExtent,
+          maxHeightDiskCache:
+              ProductManagementConfig.productImageDiskCacheExtent,
+          placeholder: placeholder,
+          errorPlaceholder: placeholder,
+        ),
+      ),
     );
   }
 }
@@ -997,10 +1201,354 @@ class _InventoryError extends StatelessWidget {
   }
 }
 
+enum _ProductEntryMode {
+  scanBarcode,
+  manualEntry,
+}
+
+class _ProductEntryModeDialog extends StatelessWidget {
+  const _ProductEntryModeDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text(ProductManagementText.chooseEntryMode),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.document_scanner_outlined),
+            title: const Text(ProductManagementText.scanBarcode),
+            subtitle: const Text(ProductManagementText.scanBarcodeHelp),
+            onTap: () {
+              Navigator.pop(context, _ProductEntryMode.scanBarcode);
+            },
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.edit_note_rounded),
+            title: const Text(ProductManagementText.manualEntry),
+            subtitle: const Text(ProductManagementText.manualEntryHelp),
+            onTap: () {
+              Navigator.pop(context, _ProductEntryMode.manualEntry);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+enum _StockAction {
+  increase,
+  decrease,
+  update,
+}
+
+class _StockQuantityDialog extends StatefulWidget {
+  const _StockQuantityDialog({
+    required this.action,
+    required this.currentQuantity,
+  });
+
+  final _StockAction action;
+  final int currentQuantity;
+
+  @override
+  State<_StockQuantityDialog> createState() => _StockQuantityDialogState();
+}
+
+class _StockQuantityDialogState extends State<_StockQuantityDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _quantityController;
+
+  @override
+  void initState() {
+    super.initState();
+    _quantityController = TextEditingController(
+      text: widget.action == _StockAction.update
+          ? widget.currentQuantity.toString()
+          : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _quantityController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_title),
+      content: Form(
+        key: _formKey,
+        child: TextFormField(
+          controller: _quantityController,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText: _label,
+            helperText:
+                '${ProductManagementText.currentStock}: ${widget.currentQuantity}',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+          ),
+          validator: _validateQuantity,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text(ProductManagementText.cancel),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text(ProductManagementText.continueAction),
+        ),
+      ],
+    );
+  }
+
+  String get _title {
+    return switch (widget.action) {
+      _StockAction.increase => ProductManagementText.increaseStock,
+      _StockAction.decrease => ProductManagementText.decreaseStock,
+      _StockAction.update => ProductManagementText.updateStock,
+    };
+  }
+
+  String get _label {
+    return switch (widget.action) {
+      _StockAction.increase => ProductManagementText.quantityToAdd,
+      _StockAction.decrease => ProductManagementText.quantityToRemove,
+      _StockAction.update => ProductManagementText.newStockQuantity,
+    };
+  }
+
+  String? _validateQuantity(String? value) {
+    final quantity = int.tryParse(value?.trim() ?? '');
+    if (quantity == null) return ProductManagementText.invalidStockQuantity;
+
+    if (widget.action == _StockAction.update) {
+      if (quantity < 0) return ProductManagementText.invalidStockQuantity;
+      return null;
+    }
+
+    if (quantity <= 0) return ProductManagementText.invalidStockQuantity;
+    if (widget.action == _StockAction.decrease &&
+        quantity > widget.currentQuantity) {
+      return ProductManagementText.negativeStockBlocked;
+    }
+    return null;
+  }
+
+  void _submit() {
+    if (_formKey.currentState?.validate() != true) return;
+    Navigator.pop(context, int.parse(_quantityController.text.trim()));
+  }
+}
+
+class _BarcodeScannerScreen extends StatefulWidget {
+  const _BarcodeScannerScreen();
+
+  @override
+  State<_BarcodeScannerScreen> createState() => _BarcodeScannerScreenState();
+}
+
+class _BarcodeScannerScreenState extends State<_BarcodeScannerScreen> {
+  late final MobileScannerController _controller;
+  bool _hasResult = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = MobileScannerController(
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      formats: const [
+        BarcodeFormat.ean13,
+        BarcodeFormat.ean8,
+        BarcodeFormat.upcA,
+        BarcodeFormat.upcE,
+        BarcodeFormat.code128,
+        BarcodeFormat.code39,
+        BarcodeFormat.itf14,
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    unawaited(_controller.dispose());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: const Text(ProductManagementText.scanBarcode),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        actions: [
+          _ScannerTorchButton(controller: _controller),
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: _controller,
+            fit: BoxFit.cover,
+            tapToFocus: true,
+            onDetect: _handleBarcode,
+            onDetectError: (_, __) {},
+            errorBuilder: (context, error) {
+              return _ScannerErrorView(
+                message: error.errorDetails?.message ?? error.errorCode.message,
+                onRetry: () => _controller.start(),
+              );
+            },
+          ),
+          const _ScannerOverlay(),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: FilledButton.tonalIcon(
+                  onPressed: () => Navigator.pop(context, ''),
+                  icon: const Icon(Icons.edit_note_rounded),
+                  label: const Text(ProductManagementText.manualEntry),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleBarcode(BarcodeCapture capture) {
+    if (_hasResult) return;
+    for (final barcode in capture.barcodes) {
+      final value = barcode.rawValue?.trim();
+      if (value == null || value.isEmpty) continue;
+      _hasResult = true;
+      unawaited(_controller.stop());
+      Navigator.pop(context, value);
+      return;
+    }
+  }
+}
+
+class _ScannerTorchButton extends StatelessWidget {
+  const _ScannerTorchButton({required this.controller});
+
+  final MobileScannerController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder(
+      valueListenable: controller,
+      builder: (context, state, child) {
+        if (!state.isInitialized || !state.isRunning) {
+          return const SizedBox.shrink();
+        }
+
+        final icon = switch (state.torchState) {
+          TorchState.on => Icons.flash_on_rounded,
+          TorchState.off => Icons.flash_off_rounded,
+          TorchState.auto => Icons.flash_auto_rounded,
+          TorchState.unavailable => Icons.flashlight_off_rounded,
+        };
+
+        return IconButton(
+          tooltip: ProductManagementText.toggleTorch,
+          onPressed: state.torchState == TorchState.unavailable
+              ? null
+              : controller.toggleTorch,
+          icon: Icon(icon),
+        );
+      },
+    );
+  }
+}
+
+class _ScannerOverlay extends StatelessWidget {
+  const _ScannerOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Center(
+        child: Container(
+          width: 280,
+          height: 160,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.white, width: 3),
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScannerErrorView extends StatelessWidget {
+  const _ScannerErrorView({
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.no_photography_outlined,
+                color: Colors.white,
+                size: 38,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh),
+                label: const Text(ProductManagementText.retry),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ProductFormDialog extends ConsumerStatefulWidget {
-  const _ProductFormDialog({this.product});
+  const _ProductFormDialog({
+    this.product,
+    this.initialBarcode = '',
+  });
 
   final Product? product;
+  final String initialBarcode;
 
   @override
   ConsumerState<_ProductFormDialog> createState() {
@@ -1013,19 +1561,22 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
   final _imagePicker = ImagePicker();
   late final TextEditingController _nameController;
   late final TextEditingController _unitController;
+  late final TextEditingController _barcodeController;
+  late final TextEditingController _brandController;
   late final TextEditingController _priceController;
   late final TextEditingController _discountPriceController;
   late final TextEditingController _stockQuantityController;
   late final TextEditingController _lowStockThresholdController;
   late bool _isAvailable;
-  late bool _isTopOfferEnabled;
   late bool _trackStock;
   String? _selectedCategoryId;
   Uint8List? _imageBytes;
   String? _imageFileName;
   String _imageContentType = ProductProviderConfig.defaultImageContentType;
   String? _imageError;
+  String? _barcodeLookupMessage;
   bool _isPickingImage = false;
+  bool _isLookingUpBarcode = false;
 
   @override
   void initState() {
@@ -1034,11 +1585,15 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
 
     _nameController = TextEditingController(text: product?.name ?? '');
     _unitController = TextEditingController(text: product?.unit ?? '');
+    _barcodeController = TextEditingController(
+      text: product?.barcode ?? widget.initialBarcode.trim(),
+    );
+    _brandController = TextEditingController(text: product?.brand ?? '');
     _priceController = TextEditingController(
       text: product == null ? '' : _formatInputPrice(product.price),
     );
     _discountPriceController = TextEditingController(
-      text: product == null ? '' : _formatInputPrice(product.discountPrice),
+      text: product == null ? '' : _formatInputPrice(product.sellingPrice),
     );
     _stockQuantityController = TextEditingController(
       text: product?.stockQuantity?.toString() ?? '',
@@ -1050,14 +1605,21 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     );
     _selectedCategoryId = product?.categoryId;
     _isAvailable = product?.isAvailable ?? true;
-    _isTopOfferEnabled = product == null ? false : _hasTopOffer(product);
-    _trackStock = product?.stockQuantity != null;
+    _trackStock = product == null || product.stockQuantity != null;
+
+    if (product == null && widget.initialBarcode.trim().isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _lookupBarcode(widget.initialBarcode);
+      });
+    }
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _unitController.dispose();
+    _barcodeController.dispose();
+    _brandController.dispose();
     _priceController.dispose();
     _discountPriceController.dispose();
     _stockQuantityController.dispose();
@@ -1090,47 +1652,44 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
                   validator: _requiredText,
                 ),
                 const SizedBox(height: 12),
-                _TextFormInput(
-                  controller: _unitController,
-                  label: ProductManagementText.unitLabel,
-                  helperText: ProductManagementText.unitHelp,
+                _buildCategoryDropdown(categoriesAsync),
+                const SizedBox(height: 12),
+                _BarcodeFormInput(
+                  controller: _barcodeController,
+                  isLookingUp: _isLookingUpBarcode,
+                  lookupMessage: _barcodeLookupMessage,
+                  onScan: _scanBarcode,
                 ),
                 const SizedBox(height: 12),
-                _buildCategoryDropdown(categoriesAsync),
+                _TextFormInput(
+                  controller: _brandController,
+                  label: ProductManagementText.brandLabel,
+                ),
                 const SizedBox(height: 12),
                 _TextFormInput(
                   controller: _priceController,
-                  label: ProductManagementText.priceLabel,
+                  label: ProductManagementText.mrpLabel,
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
                   validator: _requiredPositivePrice,
                 ),
                 const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text(ProductManagementText.topOffer),
-                  subtitle: const Text(ProductManagementText.topOfferHelp),
-                  value: _isTopOfferEnabled,
-                  onChanged: (value) {
-                    setState(() {
-                      _isTopOfferEnabled = value;
-                      if (!value) _discountPriceController.clear();
-                    });
-                  },
-                ),
-                if (_isTopOfferEnabled) ...[
-                  const SizedBox(height: 8),
-                  _TextFormInput(
-                    controller: _discountPriceController,
-                    label: ProductManagementText.discountPriceLabel,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    helperText: ProductManagementText.discountPriceHelp,
-                    validator: _discountPriceValidator,
+                _TextFormInput(
+                  controller: _discountPriceController,
+                  label: ProductManagementText.sellingPriceLabel,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
                   ),
-                ],
+                  helperText: ProductManagementText.sellingPriceHelp,
+                  validator: _sellingPriceValidator,
+                ),
+                const SizedBox(height: 12),
+                _TextFormInput(
+                  controller: _unitController,
+                  label: ProductManagementText.unitLabel,
+                  helperText: ProductManagementText.unitHelp,
+                ),
                 const SizedBox(height: 12),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -1157,6 +1716,13 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
                   isPickingImage: _isPickingImage,
                   errorText: _imageError,
                   onPickImage: _pickImage,
+                  onViewImage: () {
+                    _showProductImagePreview(
+                      context,
+                      imageBytes: _imageBytes,
+                      imageUrl: widget.product?.imageUrl ?? '',
+                    );
+                  },
                 ),
                 const SizedBox(height: 4),
                 SwitchListTile(
@@ -1299,6 +1865,75 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     }
   }
 
+  Future<void> _scanBarcode() async {
+    final scannedBarcode = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => const _BarcodeScannerScreen(),
+      ),
+    );
+    if (!mounted) return;
+
+    final barcode = scannedBarcode?.trim();
+    if (barcode == null || barcode.isEmpty) return;
+
+    _barcodeController.text = barcode;
+    await _lookupBarcode(barcode);
+  }
+
+  Future<void> _lookupBarcode(String barcode) async {
+    final normalizedBarcode = barcode.trim();
+    if (normalizedBarcode.isEmpty || _isLookingUpBarcode) return;
+
+    setState(() {
+      _isLookingUpBarcode = true;
+      _barcodeLookupMessage = ProductManagementText.barcodeLookupLoading;
+    });
+
+    try {
+      final result = await const _BarcodeProductLookupService().lookup(
+        normalizedBarcode,
+      );
+      if (!mounted) return;
+
+      if (result == null) {
+        setState(() {
+          _barcodeLookupMessage =
+              ProductManagementText.barcodeLookupUnavailable;
+        });
+        return;
+      }
+
+      setState(() {
+        if (_nameController.text.trim().isEmpty &&
+            result.productName.trim().isNotEmpty) {
+          _nameController.text = result.productName.trim();
+        }
+        if (_brandController.text.trim().isEmpty &&
+            result.brand.trim().isNotEmpty) {
+          _brandController.text = result.brand.trim();
+        }
+        final mrp = result.mrp;
+        if (_priceController.text.trim().isEmpty && mrp != null && mrp > 0) {
+          final formattedMrp = _formatInputPrice(mrp);
+          _priceController.text = formattedMrp;
+          if (_discountPriceController.text.trim().isEmpty) {
+            _discountPriceController.text = formattedMrp;
+          }
+        }
+        _barcodeLookupMessage = ProductManagementText.barcodeLookupApplied;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _barcodeLookupMessage = ProductManagementText.barcodeLookupUnavailable;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLookingUpBarcode = false);
+      }
+    }
+  }
+
   void _submit() {
     final isFormValid = _formKey.currentState?.validate() == true;
     final hasImage = _imageBytes != null ||
@@ -1310,23 +1945,29 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
 
     if (!isFormValid || !hasImage) return;
 
+    final mrp = double.parse(_priceController.text.trim());
+    final sellingPrice = double.parse(_discountPriceController.text.trim());
+    final stockQuantity = _trackStock
+        ? int.tryParse(_stockQuantityController.text.trim()) ?? 0
+        : null;
+
     Navigator.pop(
       context,
       AdminProductInput(
         productId: widget.product?.id,
         name: _nameController.text.trim(),
         categoryId: _selectedCategoryId!.trim(),
-        price: double.parse(_priceController.text.trim()),
-        discountPrice: _isTopOfferEnabled
-            ? double.tryParse(_discountPriceController.text.trim()) ?? 0
-            : 0,
+        price: mrp,
+        discountPrice: sellingPrice < mrp ? sellingPrice : 0,
         existingImageUrl: widget.product?.imageUrl ?? '',
-        isAvailable: _isAvailable,
+        isAvailable: _trackStock && stockQuantity != null
+            ? stockQuantity > 0
+            : _isAvailable,
         unit: _unitController.text.trim(),
+        barcode: _barcodeController.text.trim(),
+        brand: _brandController.text.trim(),
         trackStock: _trackStock,
-        stockQuantity: _trackStock
-            ? int.tryParse(_stockQuantityController.text.trim())
-            : null,
+        stockQuantity: stockQuantity,
         lowStockThreshold: _trackStock
             ? int.tryParse(_lowStockThresholdController.text.trim()) ??
                 ProductManagementConfig.lowStockThreshold
@@ -1351,21 +1992,19 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     return null;
   }
 
-  String? _discountPriceValidator(String? value) {
-    if (!_isTopOfferEnabled) return null;
-
+  String? _sellingPriceValidator(String? value) {
     final trimmed = value?.trim() ?? '';
-    if (trimmed.isEmpty) return ProductManagementText.discountRequired;
+    if (trimmed.isEmpty) return ProductManagementText.sellingPriceRequired;
 
-    final discountPrice = double.tryParse(trimmed);
-    final price = double.tryParse(_priceController.text.trim());
+    final sellingPrice = double.tryParse(trimmed);
+    final mrp = double.tryParse(_priceController.text.trim());
 
-    if (discountPrice == null || discountPrice <= 0) {
-      return ProductManagementText.invalidDiscountPrice;
+    if (sellingPrice == null || sellingPrice <= 0) {
+      return ProductManagementText.invalidSellingPrice;
     }
 
-    if (price != null && price > 0 && discountPrice >= price) {
-      return ProductManagementText.discountExceedsPrice;
+    if (mrp != null && mrp > 0 && sellingPrice > mrp) {
+      return ProductManagementText.sellingPriceExceedsMrp;
     }
 
     return null;
@@ -1433,6 +2072,48 @@ class _TextFormInput extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         helperText: helperText,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
+      ),
+    );
+  }
+}
+
+class _BarcodeFormInput extends StatelessWidget {
+  const _BarcodeFormInput({
+    required this.controller,
+    required this.isLookingUp,
+    required this.lookupMessage,
+    required this.onScan,
+  });
+
+  final TextEditingController controller;
+  final bool isLookingUp;
+  final String? lookupMessage;
+  final VoidCallback onScan;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.text,
+      textInputAction: TextInputAction.next,
+      decoration: InputDecoration(
+        labelText: ProductManagementText.barcodeLabel,
+        helperText: lookupMessage ?? ProductManagementText.barcodeHelp,
+        prefixIcon: const Icon(Icons.qr_code_2_rounded),
+        suffixIcon: IconButton(
+          tooltip: ProductManagementText.scanBarcode,
+          onPressed: isLookingUp ? null : onScan,
+          icon: isLookingUp
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.document_scanner_outlined),
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
         ),
@@ -1524,6 +2205,7 @@ class _ImagePickerField extends StatelessWidget {
     required this.isPickingImage,
     required this.errorText,
     required this.onPickImage,
+    required this.onViewImage,
   });
 
   final Uint8List? imageBytes;
@@ -1531,6 +2213,7 @@ class _ImagePickerField extends StatelessWidget {
   final bool isPickingImage;
   final String? errorText;
   final VoidCallback onPickImage;
+  final VoidCallback onViewImage;
 
   @override
   Widget build(BuildContext context) {
@@ -1552,6 +2235,7 @@ class _ImagePickerField extends StatelessWidget {
               _ImagePreview(
                 imageBytes: imageBytes,
                 imageUrl: imageUrl,
+                onTap: onViewImage,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1611,10 +2295,12 @@ class _ImagePreview extends StatelessWidget {
   const _ImagePreview({
     required this.imageBytes,
     required this.imageUrl,
+    required this.onTap,
   });
 
   final Uint8List? imageBytes;
   final String imageUrl;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1630,36 +2316,44 @@ class _ImagePreview extends StatelessWidget {
 
     final bytes = imageBytes;
     if (bytes != null) {
-      return ClipRRect(
+      return InkWell(
         borderRadius: BorderRadius.circular(AppRadii.md),
-        child: Image.memory(
-          bytes,
-          width: ProductManagementConfig.formImageSize,
-          height: ProductManagementConfig.formImageSize,
-          cacheWidth: ProductManagementConfig.formImageCacheExtent,
-          cacheHeight: ProductManagementConfig.formImageCacheExtent,
-          fit: BoxFit.cover,
+        onTap: onTap,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          child: Image.memory(
+            bytes,
+            width: ProductManagementConfig.formImageSize,
+            height: ProductManagementConfig.formImageSize,
+            cacheWidth: ProductManagementConfig.formImageCacheExtent,
+            cacheHeight: ProductManagementConfig.formImageCacheExtent,
+            fit: BoxFit.cover,
+          ),
         ),
       );
     }
 
-    return AppCachedNetworkImage(
-      imageUrl: imageUrl,
-      width: ProductManagementConfig.formImageSize,
-      height: ProductManagementConfig.formImageSize,
+    return InkWell(
       borderRadius: BorderRadius.circular(AppRadii.md),
-      memCacheWidth: ProductManagementConfig.formImageCacheExtent,
-      memCacheHeight: ProductManagementConfig.formImageCacheExtent,
-      maxWidthDiskCache: ProductManagementConfig.formImageDiskCacheExtent,
-      maxHeightDiskCache: ProductManagementConfig.formImageDiskCacheExtent,
-      placeholder: placeholder,
-      errorPlaceholder: placeholder,
+      onTap: onTap,
+      child: AppCachedNetworkImage(
+        imageUrl: imageUrl,
+        width: ProductManagementConfig.formImageSize,
+        height: ProductManagementConfig.formImageSize,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        memCacheWidth: ProductManagementConfig.formImageCacheExtent,
+        memCacheHeight: ProductManagementConfig.formImageCacheExtent,
+        maxWidthDiskCache: ProductManagementConfig.formImageDiskCacheExtent,
+        maxHeightDiskCache: ProductManagementConfig.formImageDiskCacheExtent,
+        placeholder: placeholder,
+        errorPlaceholder: placeholder,
+      ),
     );
   }
 }
 
-class _AvailabilityStyle {
-  const _AvailabilityStyle({
+class _InventoryBadgeStyle {
+  const _InventoryBadgeStyle({
     required this.label,
     required this.foreground,
     required this.background,
@@ -1669,19 +2363,27 @@ class _AvailabilityStyle {
   final Color foreground;
   final Color background;
 
-  static _AvailabilityStyle resolve(bool isAvailable) {
-    if (isAvailable) {
-      return _AvailabilityStyle(
-        label: ProductManagementText.available,
-        foreground: AppColors.primary,
-        background: AppColors.softGreen,
+  static _InventoryBadgeStyle resolve(Product product) {
+    if (!product.isAvailable || product.isStockEmpty) {
+      return _InventoryBadgeStyle(
+        label: ProductManagementText.outOfStock,
+        foreground: ProductManagementColors.danger,
+        background: ProductManagementColors.dangerBackground,
       );
     }
 
-    return _AvailabilityStyle(
-      label: ProductManagementText.outOfStock,
-      foreground: AppColors.accent,
-      background: AppColors.softOrange,
+    if (product.isLowStock) {
+      return _InventoryBadgeStyle(
+        label: ProductManagementText.lowStock,
+        foreground: ProductManagementColors.warning,
+        background: AppColors.softOrange,
+      );
+    }
+
+    return const _InventoryBadgeStyle(
+      label: ProductManagementText.available,
+      foreground: AppColors.primary,
+      background: AppColors.softGreen,
     );
   }
 }
@@ -1710,7 +2412,7 @@ class _StockStyle {
     if (quantity <= 0) {
       return const _StockStyle(
         label: ProductManagementText.noStock,
-        color: AppColors.accent,
+        color: ProductManagementColors.danger,
         icon: Icons.error_outline_rounded,
       );
     }
@@ -1739,11 +2441,154 @@ bool _hasTopOffer(Product product) {
   return product.discountPrice > 0 && product.discountPrice < product.price;
 }
 
+void _showProductImagePreview(
+  BuildContext context, {
+  Uint8List? imageBytes,
+  required String imageUrl,
+}) {
+  final hasImage = imageBytes != null || imageUrl.trim().isNotEmpty;
+
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      final fallback = const AppImagePlaceholder(
+        icon: Icons.broken_image_outlined,
+        iconSize: 42,
+        backgroundColor: AppColors.softGreen,
+      );
+
+      Widget image;
+      if (imageBytes != null) {
+        image = Image.memory(
+          imageBytes,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+        );
+      } else if (hasImage) {
+        image = AppCachedNetworkImage(
+          imageUrl: imageUrl,
+          fit: BoxFit.contain,
+          placeholder: const AppImagePlaceholder(isLoading: true),
+          errorPlaceholder: fallback,
+        );
+      } else {
+        image = fallback;
+      }
+
+      return Dialog(
+        insetPadding: const EdgeInsets.all(18),
+        child: Stack(
+          children: [
+            SizedBox(
+              width: double.infinity,
+              height: MediaQuery.sizeOf(dialogContext).height * 0.72,
+              child: InteractiveViewer(
+                minScale: 0.8,
+                maxScale: 4,
+                child: Center(child: image),
+              ),
+            ),
+            Positioned(
+              right: 6,
+              top: 6,
+              child: IconButton.filledTonal(
+                tooltip: ProductManagementText.close,
+                onPressed: () => Navigator.pop(dialogContext),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+class _BarcodeProductLookup {
+  const _BarcodeProductLookup({
+    required this.productName,
+    required this.brand,
+    required this.mrp,
+  });
+
+  final String productName;
+  final String brand;
+  final double? mrp;
+}
+
+class _BarcodeProductLookupService {
+  const _BarcodeProductLookupService();
+
+  Future<_BarcodeProductLookup?> lookup(String barcode) async {
+    final normalizedBarcode = barcode.trim();
+    if (normalizedBarcode.isEmpty) return null;
+
+    final client = HttpClient();
+    client.connectionTimeout = ProductManagementConfig.lookupTimeout;
+    try {
+      final uri = Uri.https(
+        'world.openfoodfacts.org',
+        '/api/v2/product/$normalizedBarcode.json',
+        {
+          'fields': 'product_name,brands,mrp,price,maximum_retail_price',
+        },
+      );
+      final request = await client.getUrl(uri).timeout(
+            ProductManagementConfig.lookupTimeout,
+          );
+      final response = await request.close().timeout(
+            ProductManagementConfig.lookupTimeout,
+          );
+      if (response.statusCode != HttpStatus.ok) return null;
+
+      final body = await response.transform(utf8.decoder).join().timeout(
+            ProductManagementConfig.lookupTimeout,
+          );
+      final decoded = jsonDecode(body);
+      if (decoded is! Map<String, dynamic>) return null;
+      if (decoded['status'] != 1) return null;
+
+      final product = decoded['product'];
+      if (product is! Map<String, dynamic>) return null;
+
+      final name = _lookupString(product['product_name']);
+      final brand = _lookupString(product['brands']);
+      final mrp = _lookupAmount(
+        product['mrp'] ?? product['maximum_retail_price'] ?? product['price'],
+      );
+
+      if (name.isEmpty && brand.isEmpty && mrp == null) return null;
+      return _BarcodeProductLookup(
+        productName: name,
+        brand: brand,
+        mrp: mrp,
+      );
+    } finally {
+      client.close(force: true);
+    }
+  }
+}
+
+String _lookupString(Object? value) {
+  return value?.toString().trim() ?? '';
+}
+
+double? _lookupAmount(Object? value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+
+  final normalized = value.toString().replaceAll(RegExp(r'[^0-9.]'), '').trim();
+  if (normalized.isEmpty) return null;
+  return double.tryParse(normalized);
+}
+
 class ProductManagementConfig {
   const ProductManagementConfig._();
 
   static const listExtraItems = 2;
   static const loadMoreExtent = 420.0;
+  static const searchDebounceDuration = Duration(milliseconds: 350);
+  static const lookupTimeout = Duration(seconds: 4);
   static const summaryMetricWidth = 112.0;
   static const productImageSize = 82.0;
   static const formWidth = 460.0;
@@ -1763,6 +2608,8 @@ class ProductManagementColors {
   const ProductManagementColors._();
 
   static const warning = Color(0xFFB45309);
+  static const danger = Color(0xFFDC2626);
+  static const dangerBackground = Color(0xFFFEE2E2);
   static const delete = Color(0xFFDC2626);
 }
 
@@ -1772,7 +2619,7 @@ class ProductManagementText {
   static const title = 'Manage Products';
   static const dashboardTitle = 'Product Inventory';
   static const dashboardSubtitle = 'Add, edit, and keep stock status current.';
-  static const loadedProducts = 'Loaded';
+  static const totalProducts = 'Total Products';
   static const adminAccessRequired = 'Admin access required';
   static const addProduct = 'Add Product';
   static const editProduct = 'Edit Product';
@@ -1784,37 +2631,53 @@ class ProductManagementText {
   static const imagePickError = 'Unable to select image';
   static const emptyImageError = 'Selected image is empty';
   static const stockUpdateError = 'Unable to update stock status';
+  static const stockQuantityUpdateError = 'Unable to update stock quantity';
   static const deleteError = 'Unable to delete product';
   static const addSuccess = 'Product added';
   static const updateSuccess = 'Product updated';
   static const deleteSuccess = 'Product deleted';
   static const stockUpdateSuccess = 'Stock status updated';
+  static const stockQuantityUpdateSuccess = 'Stock quantity updated';
   static const refresh = 'Refresh products';
   static const retry = 'Retry';
   static const loadMore = 'Load more';
   static const endOfList = 'All loaded products are visible';
   static const nameLabel = 'Name';
+  static const brandLabel = 'Brand';
   static const categoryLabel = 'Category';
   static const selectCategory = 'Select category';
   static const noCategories = 'No categories available';
   static const categoriesError = 'Unable to load categories';
   static const currentCategoryPrefix = 'Current:';
   static const categoryPrefix = 'Category:';
-  static const searchProducts = 'Search products';
+  static const barcodePrefix = 'Barcode:';
+  static const searchProducts = 'Search inventory';
+  static const searchProductsHint = 'Search product name or barcode';
   static const clearSearch = 'Clear search';
   static const filterByCategory = 'Filter by category';
   static const allCategories = 'All categories';
   static const clearFilters = 'Clear filters';
   static const noFilteredProducts = 'No products match these filters';
-  static const priceLabel = 'Price';
+  static const chooseEntryMode = 'Add product';
+  static const scanBarcode = 'Scan Barcode';
+  static const scanBarcodeHelp = 'Use the camera to fill the barcode field.';
+  static const manualEntry = 'Manual Entry';
+  static const manualEntryHelp = 'Enter product details without scanning.';
+  static const barcodeLabel = 'Barcode';
+  static const barcodeHelp = 'Scan or type the product barcode.';
+  static const barcodeLookupLoading = 'Looking up product details...';
+  static const barcodeLookupApplied = 'Product details filled where available.';
+  static const barcodeLookupUnavailable =
+      'Lookup unavailable. Continue manually.';
+  static const toggleTorch = 'Toggle flash';
+  static const mrpLabel = 'MRP';
+  static const sellingPriceLabel = 'Selling Price';
+  static const sellingPriceHelp = 'Must be less than or equal to MRP.';
   static const unitLabel = 'Unit';
   static const unitHelp = 'Example: 1 kg, 500 ml, pack';
   static const topOffer = 'Top Offer';
   static const topOffers = 'Top Offers';
   static const topOfferHelp = 'Show this product in offer sections.';
-  static const discountPriceLabel = 'Discount Price (optional)';
-  static const discountPriceHelp = 'Must be lower than the regular price.';
-  static const discountRequired = 'Enter an offer price';
   static const imageLabel = 'Product image';
   static const imageHelp = 'Choose a gallery image to upload.';
   static const pickImage = 'Pick Image';
@@ -1825,6 +2688,19 @@ class ProductManagementText {
   static const trackStockHelp = 'Enable quantity and low-stock alerts.';
   static const stockQuantityLabel = 'Stock Quantity';
   static const lowStockThresholdLabel = 'Low Stock Alert';
+  static const manageStock = 'Manage stock';
+  static const increaseStock = 'Increase stock';
+  static const decreaseStock = 'Decrease stock';
+  static const updateStock = 'Update stock';
+  static const confirmStockUpdate = 'Confirm stock update';
+  static const currentStock = 'Current stock';
+  static const newStock = 'New stock';
+  static const quantityToAdd = 'Quantity to add';
+  static const quantityToRemove = 'Quantity to remove';
+  static const newStockQuantity = 'New stock quantity';
+  static const negativeStockBlocked = 'Stock cannot go below zero';
+  static const continueAction = 'Continue';
+  static const confirm = 'Confirm';
   static const stock = 'Stock';
   static const lowStock = 'Low Stock';
   static const noStock = 'No stock left';
@@ -1836,10 +2712,12 @@ class ProductManagementText {
   static const cancel = 'Cancel';
   static const save = 'Save';
   static const delete = 'Delete';
+  static const close = 'Close';
   static const requiredField = 'Required';
   static const invalidPrice = 'Enter a valid price';
-  static const invalidDiscountPrice = 'Enter a valid discount price';
-  static const discountExceedsPrice = 'Discount must be less than price';
+  static const sellingPriceRequired = 'Enter a selling price';
+  static const invalidSellingPrice = 'Enter a valid selling price';
+  static const sellingPriceExceedsMrp = 'Selling price cannot exceed MRP';
   static const invalidStockQuantity = 'Enter a valid stock quantity';
   static const invalidLowStockThreshold = 'Enter a valid alert quantity';
 }
