@@ -192,11 +192,199 @@ class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen> {
   }
 }
 
+class AdminDateOrdersScreen extends ConsumerStatefulWidget {
+  const AdminDateOrdersScreen({
+    super.key,
+    required this.date,
+  });
+
+  final DateTime date;
+
+  @override
+  ConsumerState<AdminDateOrdersScreen> createState() {
+    return _AdminDateOrdersScreenState();
+  }
+}
+
+class _AdminDateOrdersScreenState extends ConsumerState<AdminDateOrdersScreen> {
+  final _searchController = TextEditingController();
+  Timer? _searchDebounce;
+
+  DateTime get _date => _dateOnly(widget.date);
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isAdminAsync = ref.watch(isAdminProvider);
+    final isAdmin = isAdminAsync.maybeWhen(
+      data: (value) => value,
+      orElse: () => false,
+    );
+
+    if (!isAdmin) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Date Orders')),
+        body: Center(
+          child: isAdminAsync.isLoading
+              ? const CircularProgressIndicator()
+              : const Text('Admin access required'),
+        ),
+      );
+    }
+
+    final listProvider = adminDateOrderListProvider(_date);
+    final ordersAsync = ref.watch(listProvider);
+    final pendingStatusUpdates = ref.watch(orderStatusUpdateControllerProvider);
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(title: Text('Orders - ${_formatDateOnly(_date)}')),
+      body: ordersAsync.when(
+        data: (state) {
+          final orders = state.orders;
+
+          return Column(
+            children: [
+              _DateOrderControls(
+                controller: _searchController,
+                isSearching: state.searchQuery.isNotEmpty,
+                statusFilter: state.statusFilter,
+                sortAscending: state.sortAscending,
+                onSearchChanged: _onSearchChanged,
+                onClearSearch: _clearSearch,
+                onStatusChanged: (status) {
+                  ref.read(listProvider.notifier).setStatusFilter(status);
+                },
+                onSortChanged: (sortAscending) {
+                  ref.read(listProvider.notifier).setSortAscending(
+                        sortAscending,
+                      );
+                },
+              ),
+              Expanded(
+                child: orders.isEmpty
+                    ? _AdminOrdersEmptyState(searchQuery: state.searchQuery)
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        itemCount: orders.length + 1,
+                        separatorBuilder: (_, __) => const SizedBox(height: 12),
+                        itemBuilder: (context, index) {
+                          if (index >= orders.length) {
+                            return _AdminOrderListFooter(
+                              isLoading: state.isLoadingMore,
+                              hasMore: state.hasMore,
+                              onLoadMore: () => _loadMore(context),
+                            );
+                          }
+
+                          final order = orders[index];
+                          final effectiveStatus =
+                              pendingStatusUpdates[order.id] ??
+                                  OrderStatus.normalize(order.status);
+                          final isUpdating =
+                              pendingStatusUpdates.containsKey(order.id);
+
+                          return _AdminOrderCard(
+                            order: order,
+                            effectiveStatus: effectiveStatus,
+                            isUpdating: isUpdating,
+                            onStatusChanged: (status) async {
+                              try {
+                                await ref
+                                    .read(
+                                      orderStatusUpdateControllerProvider
+                                          .notifier,
+                                    )
+                                    .updateOrderStatus(
+                                      orderId: order.id,
+                                      status: status,
+                                    );
+                                await ref
+                                    .read(listProvider.notifier)
+                                    .loadInitial();
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      AdminOrdersText.statusUpdateSuccess,
+                                    ),
+                                  ),
+                                );
+                              } catch (error) {
+                                if (!context.mounted) return;
+                                AppErrorHandler.showErrorSnackBar(
+                                  context,
+                                  error,
+                                  fallbackMessage:
+                                      'Unable to update order status',
+                                );
+                              }
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          );
+        },
+        loading: () => const AppLoadingState(),
+        error: (error, _) => AppRetryState(
+          icon: Icons.error_outline_rounded,
+          title: 'Unable to load date orders',
+          message: AppErrorHandler.messageFor(
+            error,
+            fallback: 'Please try again in a moment.',
+          ),
+          onRetry: () {
+            ref.read(listProvider.notifier).loadInitial();
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadMore(BuildContext context) async {
+    try {
+      final listProvider = adminDateOrderListProvider(_date);
+      await ref.read(listProvider.notifier).loadNext();
+    } catch (error) {
+      if (!context.mounted) return;
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: 'Unable to load more orders',
+      );
+    }
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      final listProvider = adminDateOrderListProvider(_date);
+      ref.read(listProvider.notifier).search(value);
+    });
+  }
+
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    final listProvider = adminDateOrderListProvider(_date);
+    ref.read(listProvider.notifier).search('');
+  }
+}
+
 class AdminOrdersText {
   const AdminOrdersText._();
 
   static const statusUpdateSuccess = 'Order status updated';
-  static const searchHint = 'Search by order ID or ending digits';
+  static const searchHint = 'Search by order ID, customer, or phone';
 }
 
 class _AdminOrdersEmptyState extends StatelessWidget {
@@ -266,6 +454,128 @@ class _AdminOrderSearchField extends StatelessWidget {
             borderSide: const BorderSide(color: AppColors.border),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _DateOrderControls extends StatelessWidget {
+  const _DateOrderControls({
+    required this.controller,
+    required this.isSearching,
+    required this.statusFilter,
+    required this.sortAscending,
+    required this.onSearchChanged,
+    required this.onClearSearch,
+    required this.onStatusChanged,
+    required this.onSortChanged,
+  });
+
+  final TextEditingController controller;
+  final bool isSearching;
+  final String statusFilter;
+  final bool sortAscending;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onClearSearch;
+  final ValueChanged<String> onStatusChanged;
+  final ValueChanged<bool> onSortChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedStatus = statusFilter.trim().isEmpty
+        ? 'All'
+        : OrderStatus.normalize(statusFilter);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      child: Column(
+        children: [
+          TextField(
+            controller: controller,
+            textInputAction: TextInputAction.search,
+            onChanged: onSearchChanged,
+            decoration: InputDecoration(
+              hintText: AdminOrdersText.searchHint,
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: isSearching
+                  ? IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: onClearSearch,
+                      icon: const Icon(Icons.close_rounded),
+                    )
+                  : null,
+              filled: true,
+              fillColor: AppColors.card,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final filters = [
+                SizedBox(
+                  width: constraints.maxWidth >= 520
+                      ? (constraints.maxWidth - 10) / 2
+                      : constraints.maxWidth,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: selectedStatus,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Status',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: 'All', child: Text('All')),
+                      for (final status in OrderStatus.values)
+                        DropdownMenuItem(value: status, child: Text(status)),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      onStatusChanged(value == 'All' ? '' : value);
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: constraints.maxWidth >= 520
+                      ? (constraints.maxWidth - 10) / 2
+                      : constraints.maxWidth,
+                  child: SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(
+                        value: false,
+                        icon: Icon(Icons.south_rounded),
+                        label: Text('Newest'),
+                      ),
+                      ButtonSegment(
+                        value: true,
+                        icon: Icon(Icons.north_rounded),
+                        label: Text('Oldest'),
+                      ),
+                    ],
+                    selected: {sortAscending},
+                    onSelectionChanged: (values) {
+                      onSortChanged(values.first);
+                    },
+                  ),
+                ),
+              ];
+
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: filters,
+              );
+            },
+          ),
+        ],
       ),
     );
   }
@@ -743,6 +1053,18 @@ class _DetailRow extends StatelessWidget {
 
 String _formatPrice(double price) {
   return price % 1 == 0 ? price.toStringAsFixed(0) : price.toStringAsFixed(2);
+}
+
+DateTime _dateOnly(DateTime date) {
+  final localDate = date.toLocal();
+  return DateTime(localDate.year, localDate.month, localDate.day);
+}
+
+String _formatDateOnly(DateTime date) {
+  final localDate = date.toLocal();
+  final day = localDate.day.toString().padLeft(2, '0');
+  final month = localDate.month.toString().padLeft(2, '0');
+  return '$day/$month/${localDate.year}';
 }
 
 class _OrderIdBlock extends StatelessWidget {

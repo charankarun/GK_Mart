@@ -91,7 +91,33 @@ service cloud.firestore {
 
     function validOrderId(orderId) {
       return orderId is string
-        && orderId.matches('^SLV-[0-9]{8}-[A-Z0-9]{4}$');
+        && (
+          orderId.matches('^SLV-[0-9]{8}-[A-Z0-9]{4}$')
+          || orderId.matches('^GK[0-9]{5,}$')
+        );
+    }
+
+    function validOrderCounterCreate(counterId) {
+      let data = request.resource.data;
+      return counterId == 'orders'
+        && signedIn()
+        && data.keys().hasOnly(['next', 'updatedAt'])
+        && data.keys().hasAll(['next', 'updatedAt'])
+        && data.next is number
+        && data.next >= 2
+        && data.updatedAt == request.time;
+    }
+
+    function validOrderCounterUpdate(counterId) {
+      let data = request.resource.data;
+      return counterId == 'orders'
+        && signedIn()
+        && data.keys().hasOnly(['next', 'updatedAt'])
+        && data.keys().hasAll(['next', 'updatedAt'])
+        && data.next is number
+        && resource.data.next is number
+        && data.next == resource.data.next + 1
+        && data.updatedAt == request.time;
     }
 
     function validOrderCreate(orderId) {
@@ -218,8 +244,6 @@ service cloud.firestore {
           'discountPrice',
           'imageUrl',
           'isAvailable',
-          'barcode',
-          'brand',
           'createdAt',
           'updatedAt',
         ])
@@ -491,6 +515,13 @@ service cloud.firestore {
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
         && validOrderStatus(request.resource.data.status);
+      allow delete: if false;
+    }
+
+    match /counters/{counterId} {
+      allow read: if signedIn() && counterId == 'orders';
+      allow create: if validOrderCounterCreate(counterId);
+      allow update: if validOrderCounterUpdate(counterId);
       allow delete: if false;
     }
 

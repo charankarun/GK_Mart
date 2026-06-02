@@ -31,6 +31,7 @@ class FirestoreCollections {
   static const carts = 'carts';
   static const cartItems = 'items';
   static const categories = 'categories';
+  static const counters = 'counters';
   static const orders = 'orders';
   static const products = 'products';
   static const users = 'users';
@@ -47,6 +48,7 @@ class FirestoreDocuments {
   const FirestoreDocuments._();
 
   static const admins = 'admins';
+  static const ordersCounter = 'orders';
 }
 
 class FirestoreFields {

@@ -1562,7 +1562,6 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
   late final TextEditingController _nameController;
   late final TextEditingController _unitController;
   late final TextEditingController _barcodeController;
-  late final TextEditingController _brandController;
   late final TextEditingController _priceController;
   late final TextEditingController _discountPriceController;
   late final TextEditingController _stockQuantityController;
@@ -1588,7 +1587,6 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     _barcodeController = TextEditingController(
       text: product?.barcode ?? widget.initialBarcode.trim(),
     );
-    _brandController = TextEditingController(text: product?.brand ?? '');
     _priceController = TextEditingController(
       text: product == null ? '' : _formatInputPrice(product.price),
     );
@@ -1619,7 +1617,6 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     _nameController.dispose();
     _unitController.dispose();
     _barcodeController.dispose();
-    _brandController.dispose();
     _priceController.dispose();
     _discountPriceController.dispose();
     _stockQuantityController.dispose();
@@ -1659,11 +1656,6 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
                   isLookingUp: _isLookingUpBarcode,
                   lookupMessage: _barcodeLookupMessage,
                   onScan: _scanBarcode,
-                ),
-                const SizedBox(height: 12),
-                _TextFormInput(
-                  controller: _brandController,
-                  label: ProductManagementText.brandLabel,
                 ),
                 const SizedBox(height: 12),
                 _TextFormInput(
@@ -1908,10 +1900,6 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
             result.productName.trim().isNotEmpty) {
           _nameController.text = result.productName.trim();
         }
-        if (_brandController.text.trim().isEmpty &&
-            result.brand.trim().isNotEmpty) {
-          _brandController.text = result.brand.trim();
-        }
         final mrp = result.mrp;
         if (_priceController.text.trim().isEmpty && mrp != null && mrp > 0) {
           final formattedMrp = _formatInputPrice(mrp);
@@ -1965,7 +1953,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
             : _isAvailable,
         unit: _unitController.text.trim(),
         barcode: _barcodeController.text.trim(),
-        brand: _brandController.text.trim(),
+        brand: widget.product?.brand ?? '',
         trackStock: _trackStock,
         stockQuantity: stockQuantity,
         lowStockThreshold: _trackStock
@@ -2507,12 +2495,10 @@ void _showProductImagePreview(
 class _BarcodeProductLookup {
   const _BarcodeProductLookup({
     required this.productName,
-    required this.brand,
     required this.mrp,
   });
 
   final String productName;
-  final String brand;
   final double? mrp;
 }
 
@@ -2530,7 +2516,7 @@ class _BarcodeProductLookupService {
         'world.openfoodfacts.org',
         '/api/v2/product/$normalizedBarcode.json',
         {
-          'fields': 'product_name,brands,mrp,price,maximum_retail_price',
+          'fields': 'product_name,mrp,price,maximum_retail_price',
         },
       );
       final request = await client.getUrl(uri).timeout(
@@ -2552,15 +2538,13 @@ class _BarcodeProductLookupService {
       if (product is! Map<String, dynamic>) return null;
 
       final name = _lookupString(product['product_name']);
-      final brand = _lookupString(product['brands']);
       final mrp = _lookupAmount(
         product['mrp'] ?? product['maximum_retail_price'] ?? product['price'],
       );
 
-      if (name.isEmpty && brand.isEmpty && mrp == null) return null;
+      if (name.isEmpty && mrp == null) return null;
       return _BarcodeProductLookup(
         productName: name,
-        brand: brand,
         mrp: mrp,
       );
     } finally {

@@ -10,6 +10,7 @@ import '../../providers/auth_providers.dart';
 import '../../providers/order_providers.dart';
 import '../../providers/product_provider.dart';
 import '../../widgets/app_state_widgets.dart';
+import 'admin_orders_screen.dart';
 
 class AdminDashboardScreen extends ConsumerStatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -93,6 +94,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
               _DashboardMetricsGrid(
                 stats: stats,
                 inventoryStatsAsync: inventoryStatsAsync,
+                onOpenSelectedDateOrders: _openOrdersForSelectedDate,
               ),
               if (inventoryStatsAsync.hasError) ...[
                 const SizedBox(height: 14),
@@ -143,6 +145,14 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
     _dashboardLog('Date filter query picked=${picked.toIso8601String()}');
     setState(() => _selectedDate = picked);
+  }
+
+  void _openOrdersForSelectedDate() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AdminDateOrdersScreen(date: _selectedDate),
+      ),
+    );
   }
 }
 
@@ -315,10 +325,12 @@ class _DashboardMetricsGrid extends StatelessWidget {
   const _DashboardMetricsGrid({
     required this.stats,
     required this.inventoryStatsAsync,
+    required this.onOpenSelectedDateOrders,
   });
 
   final _OrderDashboardStats stats;
   final AsyncValue<DashboardInventoryStats> inventoryStatsAsync;
+  final VoidCallback onOpenSelectedDateOrders;
 
   @override
   Widget build(BuildContext context) {
@@ -338,8 +350,12 @@ class _DashboardMetricsGrid extends StatelessWidget {
                 : 2;
         final textScale = MediaQuery.textScalerOf(context).scale(1);
         final extraTextHeight = ((textScale - 1) * 28).clamp(0, 36).toDouble();
-        final cardExtent =
-            (constraints.maxWidth >= 720 ? 154.0 : 162.0) + extraTextHeight;
+        final baseCardExtent = constraints.maxWidth >= 720
+            ? 166.0
+            : constraints.maxWidth < 360
+                ? 190.0
+                : 180.0;
+        final cardExtent = baseCardExtent + extraTextHeight;
 
         return GridView(
           shrinkWrap: true,
@@ -356,6 +372,7 @@ class _DashboardMetricsGrid extends StatelessWidget {
               value: stats.totalOrders.toString(),
               icon: Icons.receipt_long_rounded,
               color: AppColors.primary,
+              onTap: onOpenSelectedDateOrders,
             ),
             _DashboardMetricCard(
               title: AdminDashboardText.revenue,
@@ -374,6 +391,7 @@ class _DashboardMetricsGrid extends StatelessWidget {
               value: stats.selectedDateOrders.toString(),
               icon: Icons.event_available_rounded,
               color: AppColors.info,
+              onTap: onOpenSelectedDateOrders,
             ),
             _DashboardMetricCard(
               title: AdminDashboardText.pendingOrders,
@@ -428,71 +446,82 @@ class _DashboardMetricCard extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.color,
+    this.onTap,
   });
 
   final String title;
   final String value;
   final IconData icon;
   final Color color;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.soft,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.11),
-              borderRadius: BorderRadius.circular(AppRadii.md),
-            ),
-            child: Icon(icon, color: color),
+    final borderRadius = BorderRadius.circular(AppRadii.lg);
+
+    return Material(
+      color: AppColors.card,
+      borderRadius: borderRadius,
+      child: InkWell(
+        borderRadius: borderRadius,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: borderRadius,
+            border: Border.all(color: AppColors.border),
+            boxShadow: AppShadows.soft,
           ),
-          const SizedBox(height: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Flexible(
-                  child: FittedBox(
-                    alignment: Alignment.centerLeft,
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      value,
-                      style: const TextStyle(
-                        color: AppColors.text,
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.11),
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                ),
+                child: Icon(icon, color: color),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Flexible(
+                      child: FittedBox(
+                        alignment: Alignment.centerLeft,
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          value,
+                          style: const TextStyle(
+                            color: AppColors.text,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Flexible(
-                  child: Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.mutedText,
-                      fontWeight: FontWeight.w800,
+                    const SizedBox(height: 4),
+                    Flexible(
+                      child: Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.mutedText,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

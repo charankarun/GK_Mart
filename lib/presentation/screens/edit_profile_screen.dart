@@ -8,6 +8,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/errors/app_error_handler.dart';
 import '../../core/firebase/firebase_providers.dart';
 import '../../core/images/image_upload_processor.dart';
+import '../../core/storage/storage_image_uploader.dart';
 import '../../core/theme/app_theme.dart';
 import '../../domain/entities/app_user.dart';
 import '../providers/auth_providers.dart';
@@ -243,17 +244,17 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           '${FirebaseStoragePaths.profileImages}/'
           '${uid}_${DateTime.now().millisecondsSinceEpoch}_$safeFileName',
         );
-    final task = await storageRef
-        .putData(
-          bytes,
-          SettableMetadata(
-            contentType: _imageContentType,
-            cacheControl: EditProfileConfig.imageCacheControl,
-          ),
-        )
-        .timeout(AppDurations.uploadTimeout);
-
-    return task.ref.getDownloadURL().timeout(AppDurations.networkTimeout);
+    return StorageImageUploader.uploadBytesWithRetry(
+      ref: storageRef,
+      bytes: bytes,
+      metadata: SettableMetadata(
+        contentType: _imageContentType,
+        cacheControl: EditProfileConfig.imageCacheControl,
+      ),
+      uploadTimeout: AppDurations.uploadTimeout,
+      downloadUrlTimeout: AppDurations.networkTimeout,
+      logName: 'ProfileImageUpload',
+    );
   }
 
   static String _safeFileName(String? fileName) {

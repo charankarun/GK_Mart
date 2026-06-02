@@ -85,6 +85,13 @@ final adminOrderListProvider = StateNotifierProvider.autoDispose<
   return AdminOrderListController(ref)..loadInitial();
 });
 
+final adminDateOrderListProvider = StateNotifierProvider.autoDispose
+    .family<AdminDateOrderListController, AsyncValue<OrderListState>, DateTime>(
+  (ref, date) {
+    return AdminDateOrderListController(ref, _dateOnly(date))..loadInitial();
+  },
+);
+
 final orderDetailsProvider =
     StreamProvider.family<Order?, String>((ref, orderId) {
   return ref.watch(orderRepositoryProvider).watchOrder(orderId);
@@ -312,6 +319,107 @@ class AdminOrderListController
   }
 }
 
+class AdminDateOrderListController
+    extends StateNotifier<AsyncValue<OrderListState>> {
+  AdminDateOrderListController(this._ref, this._date)
+      : super(const AsyncLoading());
+
+  final Ref _ref;
+  final DateTime _date;
+  String _searchQuery = '';
+  String? _statusFilter;
+  bool _sortAscending = false;
+
+  Future<void> loadInitial({
+    String? searchQuery,
+    String? statusFilter,
+    bool? sortAscending,
+  }) async {
+    if (searchQuery != null) _searchQuery = searchQuery.trim();
+    if (statusFilter != null) {
+      _statusFilter = _normalizedStatusFilter(statusFilter);
+    }
+    if (sortAscending != null) _sortAscending = sortAscending;
+
+    state = const AsyncLoading();
+
+    try {
+      final repository = _ref.read(orderRepositoryProvider);
+      final page = _searchQuery.isEmpty
+          ? await repository.fetchOrdersByDatePage(
+              date: _date,
+              limit: OrderProviderConfig.dateOrderPageSize,
+              status: _statusFilter,
+              descending: !_sortAscending,
+            )
+          : await repository.searchAdminOrdersByDate(
+              query: _searchQuery,
+              date: _date,
+              limit: OrderProviderConfig.dateOrderPageSize,
+              status: _statusFilter,
+              descending: !_sortAscending,
+            );
+
+      state = AsyncData(
+        OrderListState.fromPage(page).copyWith(
+          searchQuery: _searchQuery,
+          statusFilter: _statusFilter ?? '',
+          sortAscending: _sortAscending,
+          dateFilter: _date,
+        ),
+      );
+    } catch (error, stackTrace) {
+      state = AsyncError(error, stackTrace);
+    }
+  }
+
+  Future<void> search(String query) {
+    return loadInitial(searchQuery: query);
+  }
+
+  Future<void> setStatusFilter(String statusFilter) {
+    return loadInitial(statusFilter: statusFilter);
+  }
+
+  Future<void> setSortAscending(bool sortAscending) {
+    return loadInitial(sortAscending: sortAscending);
+  }
+
+  Future<void> loadNext() async {
+    final currentState = _currentState;
+    if (currentState == null ||
+        currentState.isLoadingMore ||
+        !currentState.hasMore ||
+        _searchQuery.isNotEmpty) {
+      return;
+    }
+
+    state = AsyncData(currentState.copyWith(isLoadingMore: true));
+
+    try {
+      final page =
+          await _ref.read(orderRepositoryProvider).fetchOrdersByDatePage(
+                date: _date,
+                limit: OrderProviderConfig.dateOrderPageSize,
+                cursor: currentState.nextCursor,
+                status: _statusFilter,
+                descending: !_sortAscending,
+              );
+      state = AsyncData(currentState.appendPage(page));
+    } catch (_) {
+      state = AsyncData(currentState.copyWith(isLoadingMore: false));
+      rethrow;
+    }
+  }
+
+  OrderListState? get _currentState {
+    return state.maybeWhen(
+      data: (value) => value,
+      orElse: () => null,
+    );
+  }
+}
+
 typedef OrderPageLoader = Future<OrderPage> Function(
   OrderPageCursor? cursor,
 );
@@ -323,6 +431,9 @@ class OrderListState {
     this.nextCursor,
     this.isLoadingMore = false,
     this.searchQuery = '',
+    this.statusFilter = '',
+    this.sortAscending = false,
+    this.dateFilter,
   });
 
   final List<Order> orders;
@@ -330,6 +441,9 @@ class OrderListState {
   final bool hasMore;
   final bool isLoadingMore;
   final String searchQuery;
+  final String statusFilter;
+  final bool sortAscending;
+  final DateTime? dateFilter;
 
   factory OrderListState.fromPage(OrderPage page) {
     return OrderListState(
@@ -345,6 +459,9 @@ class OrderListState {
     bool? hasMore,
     bool? isLoadingMore,
     String? searchQuery,
+    String? statusFilter,
+    bool? sortAscending,
+    DateTime? dateFilter,
   }) {
     return OrderListState(
       orders: orders ?? this.orders,
@@ -352,6 +469,9 @@ class OrderListState {
       hasMore: hasMore ?? this.hasMore,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       searchQuery: searchQuery ?? this.searchQuery,
+      statusFilter: statusFilter ?? this.statusFilter,
+      sortAscending: sortAscending ?? this.sortAscending,
+      dateFilter: dateFilter ?? this.dateFilter,
     );
   }
 
@@ -368,6 +488,9 @@ class OrderListState {
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
       searchQuery: searchQuery,
+      statusFilter: statusFilter,
+      sortAscending: sortAscending,
+      dateFilter: dateFilter,
     );
   }
 }
@@ -376,6 +499,7 @@ class OrderProviderConfig {
   const OrderProviderConfig._();
 
   static const pageSize = 20;
+  static const dateOrderPageSize = 30;
   static const dashboardRecentOrderLimit = 4;
 }
 
@@ -394,4 +518,16 @@ void _dashboardLog(
     error: error,
     stackTrace: stackTrace,
   );
+}
+
+DateTime _dateOnly(DateTime date) {
+  final localDate = date.toLocal();
+  return DateTime(localDate.year, localDate.month, localDate.day);
+}
+
+String? _normalizedStatusFilter(String status) {
+  final trimmed = status.trim();
+  if (trimmed.isEmpty) return null;
+  final normalized = OrderStatus.normalize(trimmed);
+  return OrderStatus.values.contains(normalized) ? normalized : null;
 }

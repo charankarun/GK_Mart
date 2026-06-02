@@ -21,9 +21,25 @@ abstract class OrderRepository {
     OrderPageCursor? cursor,
   });
 
+  Future<OrderPage> fetchOrdersByDatePage({
+    required DateTime date,
+    required int limit,
+    OrderPageCursor? cursor,
+    String? status,
+    bool descending = true,
+  });
+
   Future<OrderPage> searchAdminOrders({
     required String query,
     required int limit,
+  });
+
+  Future<OrderPage> searchAdminOrdersByDate({
+    required String query,
+    required DateTime date,
+    required int limit,
+    String? status,
+    bool descending = true,
   });
 
   Future<OrderAnalytics> fetchOrderAnalytics({DateTime? date});

@@ -1,5 +1,4 @@
 import 'dart:developer' as developer;
-import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 
@@ -17,12 +16,11 @@ class FirestoreOrderRepository implements OrderRepository {
   FirestoreOrderRepository(this._firestore);
 
   final FirebaseFirestore _firestore;
-  static final Random _random = Random.secure();
   static const _defaultUserOrderLimit = 20;
   static const _defaultAdminOrderLimit = 50;
   static const _maxPageLimit = 60;
-  static const _orderIdAttempts = 12;
-  static const _orderIdAlphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  static const _orderIdPrefix = 'GK';
+  static const _orderIdMinDigits = 5;
   static const _prefixSearchTerminator = '\uf8ff';
   static const _maxOrderSearchTokens = 120;
   static const _revenueFields = ['totalAmount', 'total', 'paymentAmount'];
@@ -32,6 +30,12 @@ class FirestoreOrderRepository implements OrderRepository {
 
   CollectionReference<Map<String, dynamic>> get _orders {
     return _firestore.collection(FirestoreCollections.orders);
+  }
+
+  DocumentReference<Map<String, dynamic>> get _orderCounter {
+    return _firestore
+        .collection(FirestoreCollections.counters)
+        .doc(FirestoreDocuments.ordersCounter);
   }
 
   @override
@@ -141,6 +145,46 @@ class FirestoreOrderRepository implements OrderRepository {
   }
 
   @override
+  Future<OrderPage> fetchOrdersByDatePage({
+    required DateTime date,
+    required int limit,
+    OrderPageCursor? cursor,
+    String? status,
+    bool descending = true,
+  }) {
+    return RepositoryGuard.run(
+      message: 'Unable to load orders.',
+      action: () async {
+        final safeLimit = _safeLimit(limit);
+        if (safeLimit <= 0) {
+          return const OrderPage(orders: <Order>[], hasMore: false);
+        }
+
+        final startDate = _dateOnly(date);
+        final endDate = startDate.add(const Duration(days: 1));
+        final startTimestamp = Timestamp.fromDate(startDate);
+        final endTimestamp = Timestamp.fromDate(endDate);
+        Query<Map<String, dynamic>> query = _orders
+            .where('timestamp', isGreaterThanOrEqualTo: startTimestamp)
+            .where('timestamp', isLessThan: endTimestamp);
+
+        final normalizedStatus = _normalizedStatusFilter(status);
+        if (normalizedStatus != null) {
+          query = query.where('status', isEqualTo: normalizedStatus);
+        }
+
+        query = query.orderBy('timestamp', descending: descending).limit(
+              safeLimit,
+            );
+        query = await _startAfterOrderCursor(query: query, cursor: cursor);
+
+        final snapshot = await query.get().timeout(AppDurations.networkTimeout);
+        return _pageFromSnapshot(snapshot, safeLimit);
+      },
+    );
+  }
+
+  @override
   Future<OrderPage> searchAdminOrders({
     required String query,
     required int limit,
@@ -167,7 +211,7 @@ class FirestoreOrderRepository implements OrderRepository {
           }
         }
 
-        if (searchToken.length >= 3) {
+        if (searchToken.length >= 2) {
           final tokenSnapshot = await _orders
               .where('searchTokens', arrayContains: searchToken)
               .orderBy('timestamp', descending: true)
@@ -181,7 +225,7 @@ class FirestoreOrderRepository implements OrderRepository {
         }
 
         final prefix = searchText.toUpperCase();
-        if (prefix.length >= 3) {
+        if (prefix.length >= 2) {
           final prefixSnapshot = await _orders
               .orderBy('orderId')
               .startAt([prefix])
@@ -211,6 +255,81 @@ class FirestoreOrderRepository implements OrderRepository {
   }
 
   @override
+  Future<OrderPage> searchAdminOrdersByDate({
+    required String query,
+    required DateTime date,
+    required int limit,
+    String? status,
+    bool descending = true,
+  }) {
+    return RepositoryGuard.run(
+      message: 'Unable to search orders.',
+      action: () async {
+        final safeLimit = _safeLimit(limit);
+        final searchText = query.trim();
+        final searchToken = _searchTokenFor(searchText);
+        if (safeLimit <= 0 || searchText.isEmpty) {
+          return const OrderPage(orders: <Order>[], hasMore: false);
+        }
+
+        final startDate = _dateOnly(date);
+        final endDate = startDate.add(const Duration(days: 1));
+        final startTimestamp = Timestamp.fromDate(startDate);
+        final endTimestamp = Timestamp.fromDate(endDate);
+        final normalizedStatus = _normalizedStatusFilter(status);
+        final ordersById = <String, Order>{};
+
+        for (final candidateId in _candidateOrderIds(searchText)) {
+          final doc = await _orders.doc(candidateId).get().timeout(
+                AppDurations.networkTimeout,
+              );
+          if (!doc.exists) continue;
+          final order = _fromDocument(doc);
+          if (_isOrderInDateRange(order, startDate, endDate) &&
+              _matchesStatus(order, normalizedStatus)) {
+            ordersById[order.id] = order;
+          }
+        }
+
+        if (searchToken.length >= 2) {
+          Query<Map<String, dynamic>> tokenQuery = _orders
+              .where('searchTokens', arrayContains: searchToken)
+              .where('timestamp', isGreaterThanOrEqualTo: startTimestamp)
+              .where('timestamp', isLessThan: endTimestamp);
+
+          if (normalizedStatus != null) {
+            tokenQuery =
+                tokenQuery.where('status', isEqualTo: normalizedStatus);
+          }
+
+          tokenQuery = tokenQuery
+              .orderBy('timestamp', descending: descending)
+              .limit(safeLimit);
+
+          final tokenSnapshot =
+              await tokenQuery.get().timeout(AppDurations.networkTimeout);
+          for (final doc in tokenSnapshot.docs) {
+            final order = _fromDocument(doc);
+            ordersById[order.id] = order;
+          }
+        }
+
+        final orders = ordersById.values.toList()
+          ..sort((a, b) {
+            final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return descending ? bDate.compareTo(aDate) : aDate.compareTo(bDate);
+          });
+
+        return OrderPage(
+          orders: orders.take(safeLimit).toList(),
+          hasMore: false,
+        );
+      },
+    );
+  }
+
+  @override
   Future<OrderAnalytics> fetchOrderAnalytics({DateTime? date}) {
     return RepositoryGuard.run(
       message: 'Unable to load order analytics.',
@@ -229,7 +348,8 @@ class FirestoreOrderRepository implements OrderRepository {
 
         final ordersSnapshot =
             await _orders.get().timeout(AppDurations.dashboardTimeout);
-        _dashboardLog('Orders query result count=${ordersSnapshot.docs.length}');
+        _dashboardLog(
+            'Orders query result count=${ordersSnapshot.docs.length}');
 
         _dashboardLog('Revenue query start fields=$_revenueFields');
         final analytics = _analyticsFromOrdersSnapshot(
@@ -261,31 +381,39 @@ class FirestoreOrderRepository implements OrderRepository {
           throw ArgumentError.value(request.items, 'items', 'Required');
         }
 
-        FirebaseException? lastPermissionDenied;
-        for (var attempt = 0; attempt < _orderIdAttempts; attempt += 1) {
-          final orderId = _generateOrderId(DateTime.now());
+        return _firestore.runTransaction<String>((transaction) async {
+          final counterSnapshot = await transaction.get(_orderCounter);
+          final nextNumber = _nextOrderNumber(counterSnapshot.data());
+          final orderId = _formatOrderId(nextNumber);
           final orderRef = _orders.doc(orderId);
+          final existingOrderSnapshot = await transaction.get(orderRef);
 
-          try {
-            await orderRef
-                .set(_orderData(
-                  orderId: orderId,
-                  request: request,
-                  userId: normalizedUserId,
-                ))
-                .timeout(AppDurations.networkTimeout);
-            return orderId;
-          } on FirebaseException catch (error) {
-            if (error.code != 'permission-denied') rethrow;
-            lastPermissionDenied = error;
+          if (existingOrderSnapshot.exists) {
+            throw RepositoryException(
+              'Unable to reserve a unique order ID. Please try again.',
+              code: 'order-id-collision',
+            );
           }
-        }
 
-        throw RepositoryException(
-          'Unable to reserve a unique order ID. Please try again.',
-          code: 'order-id-collision',
-          cause: lastPermissionDenied,
-        );
+          transaction.set(
+            orderRef,
+            _orderData(
+              orderId: orderId,
+              request: request,
+              userId: normalizedUserId,
+            ),
+          );
+          transaction.set(
+            _orderCounter,
+            {
+              'next': nextNumber + 1,
+              'updatedAt': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true),
+          );
+
+          return orderId;
+        }).timeout(AppDurations.networkTimeout);
       },
     );
   }
@@ -405,7 +533,11 @@ class FirestoreOrderRepository implements OrderRepository {
       'totalAmount': request.totalAmount,
       'total': request.totalAmount,
       'totalSavings': request.totalSavings,
-      'searchTokens': _orderSearchTokens(orderId),
+      'searchTokens': _orderSearchTokens([
+        orderId,
+        request.userName,
+        request.phone,
+      ]),
       'status': OrderStatus.placed,
       'paymentMethod': request.paymentMethod,
       'createdAt': FieldValue.serverTimestamp(),
@@ -413,26 +545,19 @@ class FirestoreOrderRepository implements OrderRepository {
     };
   }
 
-  static String _generateOrderId(DateTime date) {
-    return 'SLV-${_dateStamp(date)}-${_randomSuffix()}';
+  static int _nextOrderNumber(Map<String, dynamic>? data) {
+    final nextValue = data?['next'];
+    if (nextValue is int && nextValue > 0) return nextValue;
+    if (nextValue is num && nextValue > 0) return nextValue.toInt();
+    return 1;
   }
 
-  static String _dateStamp(DateTime date) {
-    final localDate = date.toLocal();
-    final year = localDate.year.toString().padLeft(4, '0');
-    final month = localDate.month.toString().padLeft(2, '0');
-    final day = localDate.day.toString().padLeft(2, '0');
-    return '$year$month$day';
-  }
-
-  static String _randomSuffix() {
-    return String.fromCharCodes(
-      List.generate(4, (_) {
-        return _orderIdAlphabet.codeUnitAt(
-          _random.nextInt(_orderIdAlphabet.length),
-        );
-      }),
-    );
+  static String _formatOrderId(int value) {
+    final safeValue = value < 1 ? 1 : value;
+    return '$_orderIdPrefix${safeValue.toString().padLeft(
+          _orderIdMinDigits,
+          '0',
+        )}';
   }
 
   static int _safeLimit(int limit) {
@@ -605,6 +730,28 @@ class FirestoreOrderRepository implements OrderRepository {
     return DateTime(localDate.year, localDate.month, localDate.day);
   }
 
+  static String? _normalizedStatusFilter(String? status) {
+    final normalized = OrderStatus.normalize(status);
+    final trimmed = status?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return OrderStatus.values.contains(normalized) ? normalized : null;
+  }
+
+  static bool _isOrderInDateRange(
+    Order order,
+    DateTime startDate,
+    DateTime endDate,
+  ) {
+    final createdAt = order.createdAt;
+    if (createdAt == null) return false;
+    return !createdAt.isBefore(startDate) && createdAt.isBefore(endDate);
+  }
+
+  static bool _matchesStatus(Order order, String? status) {
+    if (status == null) return true;
+    return OrderStatus.normalize(order.status) == status;
+  }
+
   static void _dashboardLog(String message) {
     if (!_debugLoggingEnabled) return;
     developer.log(message, name: _dashboardLogName);
@@ -613,29 +760,39 @@ class FirestoreOrderRepository implements OrderRepository {
   static Set<String> _candidateOrderIds(String query) {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return const <String>{};
-    return {
+    final candidates = {
       trimmed,
       trimmed.toUpperCase(),
     };
+    final compact = _searchTokenFor(trimmed).toUpperCase();
+    if (RegExp(r'^[0-9]{1,8}$').hasMatch(compact)) {
+      candidates
+          .add('$_orderIdPrefix${compact.padLeft(_orderIdMinDigits, '0')}');
+    }
+    return candidates;
   }
 
   static String _searchTokenFor(String query) {
     return query.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
-  static List<String> _orderSearchTokens(String orderId) {
-    final normalized = orderId.trim().toLowerCase();
-    final compact = normalized.replaceAll(RegExp(r'[^a-z0-9]'), '');
-    final tokens = <String>{
-      if (normalized.length >= 3) normalized,
-      if (compact.length >= 3) compact,
-      for (final part in normalized.split(RegExp(r'[^a-z0-9]+')))
-        if (part.length >= 3) part,
-    };
+  static List<String> _orderSearchTokens(Iterable<String> values) {
+    final tokens = <String>{};
+
+    void addCoreTokens(String value) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized.isEmpty) return;
+      final compact = normalized.replaceAll(RegExp(r'[^a-z0-9]'), '');
+      if (normalized.length >= 2) tokens.add(normalized);
+      if (compact.length >= 2) tokens.add(compact);
+      for (final part in normalized.split(RegExp(r'[^a-z0-9]+'))) {
+        if (part.length >= 2) tokens.add(part);
+      }
+    }
 
     void addPrefixes(String value) {
       final maxLength = value.length > 20 ? 20 : value.length;
-      for (var length = 3; length <= maxLength; length += 1) {
+      for (var length = 2; length <= maxLength; length += 1) {
         tokens.add(value.substring(0, length));
         if (tokens.length >= _maxOrderSearchTokens) return;
       }
@@ -643,7 +800,7 @@ class FirestoreOrderRepository implements OrderRepository {
 
     void addSuffixes(String value) {
       final maxLength = value.length > 20 ? 20 : value.length;
-      for (var length = 3; length <= maxLength; length += 1) {
+      for (var length = 2; length <= maxLength; length += 1) {
         tokens.add(value.substring(value.length - length));
         if (tokens.length >= _maxOrderSearchTokens) return;
       }
@@ -651,7 +808,7 @@ class FirestoreOrderRepository implements OrderRepository {
 
     void addSubstrings(String value) {
       for (var start = 0; start < value.length; start += 1) {
-        for (var length = 3; length <= 8; length += 1) {
+        for (var length = 2; length <= 8; length += 1) {
           final end = start + length;
           if (end > value.length) break;
           tokens.add(value.substring(start, end));
@@ -660,11 +817,16 @@ class FirestoreOrderRepository implements OrderRepository {
       }
     }
 
-    for (final value in {normalized, compact}) {
-      if (value.length < 3) continue;
-      addPrefixes(value);
-      addSuffixes(value);
-      addSubstrings(value);
+    for (final rawValue in values) {
+      addCoreTokens(rawValue);
+      final compact = rawValue.trim().toLowerCase().replaceAll(
+            RegExp(r'[^a-z0-9]'),
+            '',
+          );
+      if (compact.length < 2) continue;
+      addPrefixes(compact);
+      addSuffixes(compact);
+      addSubstrings(compact);
       if (tokens.length >= _maxOrderSearchTokens) break;
     }
 

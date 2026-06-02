@@ -3,6 +3,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/errors/repository_exception.dart';
+import '../../core/storage/storage_image_uploader.dart';
 import '../../domain/entities/category.dart';
 import '../../domain/entities/category_image_upload.dart';
 import '../../domain/entities/category_page.dart';
@@ -189,17 +190,17 @@ class CategoryRepositoryImpl implements CategoryRepository {
         final ref = _storage.ref().child(
               '$_storagePath/${DateTime.now().millisecondsSinceEpoch}_$fileName',
             );
-        final task = await ref
-            .putData(
-              upload.bytes,
-              SettableMetadata(
-                contentType: upload.contentType,
-                cacheControl: _imageCacheControl,
-              ),
-            )
-            .timeout(AppDurations.uploadTimeout);
-
-        return task.ref.getDownloadURL().timeout(AppDurations.networkTimeout);
+        return StorageImageUploader.uploadBytesWithRetry(
+          ref: ref,
+          bytes: upload.bytes,
+          metadata: SettableMetadata(
+            contentType: upload.contentType,
+            cacheControl: _imageCacheControl,
+          ),
+          uploadTimeout: AppDurations.uploadTimeout,
+          downloadUrlTimeout: AppDurations.networkTimeout,
+          logName: 'CategoryImageUpload',
+        );
       },
     );
   }
