@@ -513,7 +513,11 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      allow create: if signedIn() && validOrderCreate(orderId);
+      allow create: if signedIn() && validOrderCreate(orderId)
+        && (
+          !exists(/databases/$(database)/documents/store_settings/config)
+          || get(/databases/$(database)/documents/store_settings/config).data.get('storeEnabled', false) == true
+        );
       allow read: if isAdmin() || (signedIn() && (resource == null || resource.data.userId == request.auth.uid));
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
@@ -526,6 +530,11 @@ service cloud.firestore {
       allow create: if validOrderCounterCreate(counterId);
       allow update: if validOrderCounterUpdate(counterId);
       allow delete: if false;
+    }
+
+    match /store_settings/{documentId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
     }
 
     match /notifications/{notificationId} {

@@ -15,6 +15,7 @@ import 'address_screen.dart';
 import 'admin/admin_category_screen.dart';
 import 'admin/admin_inventory_screen.dart';
 import 'admin/admin_orders_screen.dart';
+import 'admin/store_settings_screen.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import 'orders_screen.dart';
@@ -167,6 +168,18 @@ class AccountPage extends ConsumerWidget {
                   context,
                   MaterialPageRoute(
                     builder: (_) => const AdminOrdersScreen(),
+                  ),
+                );
+              },
+            ),
+            _AccountOption(
+              icon: Icons.storefront_outlined,
+              title: 'Store Settings',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const StoreSettingsScreen(),
                   ),
                 );
               },

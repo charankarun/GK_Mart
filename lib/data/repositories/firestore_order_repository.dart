@@ -405,6 +405,51 @@ class FirestoreOrderRepository implements OrderRepository {
         }
 
         return _firestore.runTransaction<String>((transaction) async {
+          // Verify store settings configuration
+          final configRef = _firestore.collection('store_settings').doc('config');
+          final configDoc = await transaction.get(configRef);
+          
+          final configData = configDoc.data();
+          final bool storeEnabled;
+          final int openHour;
+          final int openMinute;
+          final int closeHour;
+          final int closeMinute;
+          
+          if (!configDoc.exists || configData == null) {
+            storeEnabled = true;
+            openHour = 6;
+            openMinute = 0;
+            closeHour = 22;
+            closeMinute = 0;
+          } else {
+            storeEnabled = configData['storeEnabled'] as bool? ?? false;
+            openHour = configData['openHour'] as int? ?? 6;
+            openMinute = configData['openMinute'] as int? ?? 0;
+            closeHour = configData['closeHour'] as int? ?? 22;
+            closeMinute = configData['closeMinute'] as int? ?? 0;
+          }
+          
+          if (!storeEnabled) {
+            throw RepositoryException(
+              'Store is temporarily unavailable. Please try again later.',
+              code: 'store-disabled',
+            );
+          }
+          
+          final now = DateTime.now();
+          final currentMinutes = now.hour * 60 + now.minute;
+          final openMinutes = openHour * 60 + openMinute;
+          final closeMinutes = closeHour * 60 + closeMinute;
+          final isOpen = currentMinutes >= openMinutes && currentMinutes < closeMinutes;
+          
+          if (!isOpen) {
+            throw RepositoryException(
+              'Store is currently closed.',
+              code: 'store-closed',
+            );
+          }
+
           final counterSnapshot = await transaction.get(_orderCounter);
           final nextNumber = _nextOrderNumber(counterSnapshot.data());
           final orderId = _formatOrderId(nextNumber);

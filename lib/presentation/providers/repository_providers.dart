@@ -8,6 +8,7 @@ import '../../data/repositories/firestore_admin_repository.dart';
 import '../../data/repositories/firestore_cart_repository.dart';
 import '../../data/repositories/firestore_order_repository.dart';
 import '../../data/repositories/firestore_search_repository.dart';
+import '../../data/repositories/firestore_store_repository.dart';
 import '../../data/repositories/firestore_user_repository.dart';
 import '../../data/repositories/firestore_wishlist_repository.dart';
 import '../../data/repositories/product_repository_impl.dart';
@@ -19,6 +20,7 @@ import '../../domain/repositories/order_repository.dart';
 import '../../domain/repositories/phone_auth_repository.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../../domain/repositories/search_repository.dart';
+import '../../domain/repositories/store_repository.dart';
 import '../../domain/repositories/user_repository.dart';
 import '../../domain/repositories/wishlist_repository.dart';
 
@@ -72,4 +74,8 @@ final searchRepositoryProvider = Provider<SearchRepository>((ref) {
 
 final orderRepositoryProvider = Provider<OrderRepository>((ref) {
   return FirestoreOrderRepository(ref.watch(firestoreProvider));
+});
+
+final storeRepositoryProvider = Provider<StoreRepository>((ref) {
+  return FirestoreStoreRepository(ref.watch(firestoreProvider));
 });

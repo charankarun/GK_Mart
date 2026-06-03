@@ -9,8 +9,10 @@ import '../../../domain/entities/order_analytics.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/order_providers.dart';
 import '../../providers/product_provider.dart';
+import '../../providers/store_providers.dart';
 import '../../widgets/app_state_widgets.dart';
 import 'admin_orders_screen.dart';
+import 'store_settings_screen.dart';
 
 class AdminDashboardScreen extends ConsumerStatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -72,7 +74,23 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text(AdminDashboardText.title)),
+      appBar: AppBar(
+        title: const Text(AdminDashboardText.title),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.storefront_outlined),
+            tooltip: 'Store Settings',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const StoreSettingsScreen(),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       body: analyticsAsync.when(
         data: (analytics) {
           final stats = _OrderDashboardStats.fromAnalytics(analytics);
@@ -85,6 +103,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
             children: [
               _DashboardHeader(stats: stats),
+              const SizedBox(height: 14),
+              const _StoreStatusCard(),
               const SizedBox(height: 14),
               _DashboardDateFilter(
                 selectedDate: _selectedDate,
@@ -795,4 +815,105 @@ class AdminDashboardText {
   static const recentOrdersLoadError = 'Unable to load recent orders.';
   static const loadingValue = '...';
   static const retry = 'Retry';
+}
+
+class _StoreStatusCard extends ConsumerWidget {
+  const _StoreStatusCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final configAsync = ref.watch(storeConfigProvider);
+
+    return configAsync.when(
+      data: (config) {
+        final isOpen = config.isOpen;
+        final statusText = isOpen ? 'OPEN' : 'CLOSED';
+        final statusColor = isOpen ? AppColors.success : AppColors.danger;
+        final hoursText = "${config.formattedOpenTime} - ${config.formattedCloseTime}";
+
+        return Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            side: const BorderSide(color: AppColors.border),
+          ),
+          color: AppColors.card,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const StoreSettingsScreen(),
+                ),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.11),
+                      borderRadius: BorderRadius.circular(AppRadii.md),
+                    ),
+                    child: Icon(
+                      isOpen ? Icons.storefront_rounded : Icons.storefront_outlined,
+                      color: statusColor,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              'Store Status: ',
+                              style: TextStyle(
+                                color: AppColors.text,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              statusText,
+                              style: TextStyle(
+                                color: statusColor,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "Today's Hours: $hoursText",
+                          style: const TextStyle(
+                            color: AppColors.mutedText,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    size: 14,
+                    color: AppColors.mutedText,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
 }

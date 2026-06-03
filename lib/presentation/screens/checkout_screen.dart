@@ -15,6 +15,7 @@ import '../../domain/entities/order.dart';
 import '../providers/auth_providers.dart';
 import '../providers/commerce_providers.dart';
 import '../providers/order_providers.dart';
+import '../providers/store_providers.dart';
 import 'address_screen.dart';
 import 'order_success_screen.dart';
 
@@ -70,6 +71,29 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final orderCreationState = ref.watch(orderCreationControllerProvider);
     final isLoading = orderCreationState.isLoading;
 
+    final storeConfig = ref.watch(storeConfigProvider).maybeWhen(
+          data: (config) => config,
+          orElse: () => null,
+        );
+
+    final String? storeClosedMessage;
+    final bool isStoreClosed;
+    if (storeConfig != null) {
+      if (!storeConfig.storeEnabled) {
+        storeClosedMessage = 'Store is temporarily unavailable. Please try again later.';
+        isStoreClosed = true;
+      } else if (!storeConfig.isOpen) {
+        storeClosedMessage = 'Store is currently closed. Reopens at ${storeConfig.formattedOpenTime}.';
+        isStoreClosed = true;
+      } else {
+        storeClosedMessage = null;
+        isStoreClosed = false;
+      }
+    } else {
+      storeClosedMessage = null;
+      isStoreClosed = false;
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text(CheckoutText.title)),
       body: cartItems.isEmpty
@@ -82,6 +106,34 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     child: ListView(
                       padding: const EdgeInsets.all(12),
                       children: [
+                        if (storeClosedMessage != null) ...[
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.danger.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(AppRadii.md),
+                              border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.storefront_rounded, color: AppColors.danger),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    storeClosedMessage,
+                                    style: const TextStyle(
+                                      color: AppColors.danger,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         _OrderItemsPreview(items: cartItems),
                         const SizedBox(height: 12),
                         _SavedAddressCard(
@@ -106,6 +158,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   _CheckoutSummary(
                     pricing: pricing,
                     isLoading: isLoading,
+                    isStoreClosed: isStoreClosed,
                     onPlaceOrder: () {
                       _placeOrder(
                         userId: session.uid,
@@ -549,11 +602,13 @@ class _CheckoutSummary extends StatelessWidget {
     required this.pricing,
     required this.isLoading,
     required this.onPlaceOrder,
+    this.isStoreClosed = false,
   });
 
   final CartPricingSummary pricing;
   final bool isLoading;
   final VoidCallback onPlaceOrder;
+  final bool isStoreClosed;
 
   @override
   Widget build(BuildContext context) {
@@ -620,7 +675,7 @@ class _CheckoutSummary extends StatelessWidget {
                   borderRadius: BorderRadius.circular(AppRadii.md),
                 ),
               ),
-              onPressed: isLoading ? null : onPlaceOrder,
+              onPressed: isLoading || isStoreClosed ? null : onPlaceOrder,
               child: isLoading
                   ? const SizedBox(
                       width: 22,
