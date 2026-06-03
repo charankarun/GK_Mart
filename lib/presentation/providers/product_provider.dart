@@ -166,6 +166,7 @@ class AdminProductListController
         stockQuantity: input.stockQuantity,
         trackStock: input.trackStock,
         lowStockThreshold: input.lowStockThreshold,
+        quantityValue: input.quantityValue,
       );
 
       final repository = _ref.read(productRepositoryProvider);
@@ -427,6 +428,7 @@ class AdminProductInput {
     required this.trackStock,
     required this.stockQuantity,
     required this.lowStockThreshold,
+    this.quantityValue,
     this.productId,
     this.imageBytes,
     this.imageFileName,
@@ -446,6 +448,7 @@ class AdminProductInput {
   final bool trackStock;
   final int? stockQuantity;
   final int lowStockThreshold;
+  final double? quantityValue;
   final Uint8List? imageBytes;
   final String? imageFileName;
   final String imageContentType;

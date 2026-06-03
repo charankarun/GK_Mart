@@ -19,6 +19,7 @@ class ProductDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(currentSessionProvider);
+    final formattedQty = product.formattedQuantityUnit;
 
     if (session == null) {
       return Scaffold(
@@ -79,11 +80,13 @@ class ProductDetailScreen extends ConsumerWidget {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    product.unit,
-                    style: const TextStyle(color: Colors.grey),
-                  ),
+                  if (formattedQty.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      formattedQty,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  ],
                   if (product.trackStock &&
                       (product.stockQuantity ?? 0) <= 10 &&
                       (product.stockQuantity ?? 0) > 0) ...[

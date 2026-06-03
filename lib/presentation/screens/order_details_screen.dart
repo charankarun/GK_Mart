@@ -240,7 +240,10 @@ class OrderDetailsScreen extends ConsumerWidget {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      onPressed: () => _showCancelConfirmation(context, ref, order),
+                      onPressed: () {
+                        developer.log('Cancel button clicked', name: 'OrderCancelTrace');
+                        _showCancelConfirmation(context, ref, order);
+                      },
                       child: const Text(
                         'Cancel Order',
                         style: TextStyle(
@@ -290,7 +293,7 @@ class OrderDetailsScreen extends ConsumerWidget {
             ),
             TextButton(
               onPressed: () async {
-                developer.log('OrderDetailsScreen: Confirmation dialog confirmed with Yes, Cancel Order', name: 'OrderCancelTrace');
+                developer.log('Dialog confirmed', name: 'OrderCancelTrace');
                 Navigator.pop(context);
                 _cancelOrder(context, ref, order);
               },
@@ -306,18 +309,25 @@ class OrderDetailsScreen extends ConsumerWidget {
   }
 
   Future<void> _cancelOrder(BuildContext context, WidgetRef ref, Order order) async {
-    developer.log('OrderDetailsScreen: _cancelOrder started execution for order: ${order.id}', name: 'OrderCancelTrace');
+    developer.log('Controller called', name: 'OrderCancelTrace');
+    developer.log('Repository called', name: 'OrderCancelTrace');
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Cancelling order...')),
     );
 
     try {
-      developer.log('OrderDetailsScreen: Invoking cancelOrder on OrderRepository', name: 'OrderCancelTrace');
+      developer.log('Firestore update started', name: 'OrderCancelTrace');
       await ref.read(orderRepositoryProvider).cancelOrder(
             orderId: order.id,
             userId: order.userId,
           );
-      developer.log('OrderDetailsScreen: cancelOrder call returned successfully', name: 'OrderCancelTrace');
+      developer.log('Firestore update succeeded', name: 'OrderCancelTrace');
+      
+      developer.log('UI refresh started', name: 'OrderCancelTrace');
+      ref.invalidate(userOrderListProvider(order.userId));
+      ref.invalidate(adminOrderListProvider);
+      ref.invalidate(dashboardRecentOrdersProvider);
+      ref.invalidate(orderDetailsProvider(order.id));
       
       if (context.mounted) {
         developer.log('OrderDetailsScreen: Showing success SnackBar', name: 'OrderCancelTrace');
@@ -327,12 +337,7 @@ class OrderDetailsScreen extends ConsumerWidget {
         );
       }
     } catch (e, stackTrace) {
-      developer.log(
-        'OrderDetailsScreen: Exception caught during cancellation',
-        name: 'OrderCancelTrace',
-        error: e,
-        stackTrace: stackTrace,
-      );
+      developer.log('Firestore update failed', name: 'OrderCancelTrace', error: e, stackTrace: stackTrace);
       if (context.mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         AppErrorHandler.showErrorSnackBar(

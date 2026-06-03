@@ -32,6 +32,7 @@ class GkProductCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final discountPercent = _discountPercent(product);
     final hasDiscount = discountPercent > 0;
+    final formattedQty = product.formattedQuantityUnit;
 
     return Material(
       color: AppColors.card,
@@ -92,10 +93,10 @@ class GkProductCard extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      if (product.unit.trim().isNotEmpty) ...[
+                      if (formattedQty.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
-                          product.unit,
+                          formattedQty,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(

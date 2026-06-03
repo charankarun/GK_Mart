@@ -208,6 +208,7 @@ service cloud.firestore {
         && data.get('discountPrice', 0) >= 0
         && data.get('imageUrl', '') is string
         && data.get('isAvailable', true) is bool
+        && data.get('trackStock', true) is bool
         && data.get('unit', '') is string
         && data.get('barcode', '') is string
         && data.get('barcode', '').size() <= 64
@@ -216,7 +217,8 @@ service cloud.firestore {
         && data.get('stockQuantity', 0) is number
         && data.get('stockQuantity', 0) >= 0
         && data.get('lowStockThreshold', 5) is number
-        && data.get('lowStockThreshold', 5) >= 0;
+        && data.get('lowStockThreshold', 5) >= 0
+        && (!data.keys().hasAny(['quantityValue']) || (data.quantityValue is number && data.quantityValue >= 0));
     }
 
     function validProductCreate() {
@@ -230,11 +232,13 @@ service cloud.firestore {
           'discountPrice',
           'imageUrl',
           'isAvailable',
+          'trackStock',
           'unit',
           'barcode',
           'brand',
           'stockQuantity',
           'lowStockThreshold',
+          'quantityValue',
           'createdAt',
           'updatedAt',
         ])
@@ -265,11 +269,13 @@ service cloud.firestore {
           'discountPrice',
           'imageUrl',
           'isAvailable',
+          'trackStock',
           'unit',
           'barcode',
           'brand',
           'stockQuantity',
           'lowStockThreshold',
+          'quantityValue',
           'updatedAt',
         ])
         && validProductCore()

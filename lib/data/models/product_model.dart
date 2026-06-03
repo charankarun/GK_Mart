@@ -18,6 +18,7 @@ class ProductModel extends Product {
     super.stockQuantity,
     super.trackStock,
     super.lowStockThreshold,
+    super.quantityValue,
     super.createdAt,
     super.updatedAt,
   });
@@ -37,6 +38,7 @@ class ProductModel extends Product {
       stockQuantity: product.stockQuantity,
       trackStock: product.trackStock,
       lowStockThreshold: product.lowStockThreshold,
+      quantityValue: product.quantityValue,
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
     );
@@ -61,6 +63,9 @@ class ProductModel extends Product {
       stockQuantity: _readStockQuantity(data),
       trackStock: _readTrackStock(data),
       lowStockThreshold: _readLowStockThreshold(data),
+      quantityValue: data[ProductField.quantityValue] != null
+          ? readDouble(data[ProductField.quantityValue])
+          : null,
       createdAt: readDateTime(data[ProductField.createdAt]),
       updatedAt: readDateTime(data[ProductField.updatedAt]),
     );
@@ -100,6 +105,10 @@ class ProductModel extends Product {
         ProductField.unit: unit.trim()
       else if (includeDeletes)
         ProductField.unit: FieldValue.delete(),
+      if (quantityValue != null)
+        ProductField.quantityValue: quantityValue
+      else if (includeDeletes)
+        ProductField.quantityValue: FieldValue.delete(),
       if (stockQuantity != null) ...{
         ProductField.stockQuantity: stockQuantity,
         ProductField.lowStockThreshold: lowStockThreshold,
@@ -199,6 +208,7 @@ class ProductField {
   static const brand = 'brand';
   static const stockQuantity = 'stockQuantity';
   static const lowStockThreshold = 'lowStockThreshold';
+  static const quantityValue = 'quantityValue';
   static const createdAt = 'createdAt';
   static const updatedAt = 'updatedAt';
 

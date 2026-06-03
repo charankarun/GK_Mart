@@ -703,6 +703,9 @@ class FirestoreOrderRepository implements OrderRepository {
           final itemsList = orderData['items'];
           developer.log('FirestoreOrderRepository: Order contains ${itemsList?.length} items', name: 'OrderCancelTrace');
           if (itemsList is List) {
+            final List<DocumentReference<Map<String, dynamic>>> productRefs = [];
+            final List<int> quantities = [];
+
             for (final itemVal in itemsList) {
               if (itemVal is Map) {
                 final item = Map<String, dynamic>.from(itemVal);
@@ -710,28 +713,44 @@ class FirestoreOrderRepository implements OrderRepository {
                 final quantity = readInt(item['quantity']);
                 if (productId.isNotEmpty && quantity > 0) {
                   final productRef = _firestore.collection(FirestoreCollections.products).doc(productId);
-                  developer.log('FirestoreOrderRepository: Fetching product $productId to restore $quantity stock', name: 'OrderCancelTrace');
-                  final productDoc = await transaction.get(productRef);
-                  if (productDoc.exists) {
-                    final productData = productDoc.data();
-                    if (productData != null) {
-                      final trackStock = productData['trackStock'] as bool? ?? (productData['stockQuantity'] != null);
-                      developer.log('FirestoreOrderRepository: Product $productId trackStock=$trackStock', name: 'OrderCancelTrace');
-                      if (trackStock) {
-                        final currentStock = readInt(productData['stockQuantity']);
-                        final nextQuantity = currentStock + quantity;
-                        developer.log('FirestoreOrderRepository: Restoring product $productId stock from $currentStock to $nextQuantity', name: 'OrderCancelTrace');
-                        transaction.update(productRef, {
-                          'stockQuantity': FieldValue.increment(quantity),
-                          if (nextQuantity > 0) 'isAvailable': true,
-                          'updatedAt': FieldValue.serverTimestamp(),
-                        });
-                      }
-                    }
-                  } else {
-                    developer.log('FirestoreOrderRepository: Product $productId doc not found', name: 'OrderCancelTrace');
+                  productRefs.add(productRef);
+                  quantities.add(quantity);
+                }
+              }
+            }
+
+            // Read phase: fetch all product docs first
+            final List<DocumentSnapshot<Map<String, dynamic>>> productDocs = [];
+            for (final productRef in productRefs) {
+              developer.log('FirestoreOrderRepository: Fetching product ${productRef.id} to restore stock', name: 'OrderCancelTrace');
+              final doc = await transaction.get(productRef);
+              productDocs.add(doc);
+            }
+
+            // Write phase: perform updates
+            for (int i = 0; i < productRefs.length; i++) {
+              final productRef = productRefs[i];
+              final quantity = quantities[i];
+              final productDoc = productDocs[i];
+
+              if (productDoc.exists) {
+                final productData = productDoc.data();
+                if (productData != null) {
+                  final trackStock = productData['trackStock'] as bool? ?? (productData['stockQuantity'] != null);
+                  developer.log('FirestoreOrderRepository: Product ${productRef.id} trackStock=$trackStock', name: 'OrderCancelTrace');
+                  if (trackStock) {
+                    final currentStock = readInt(productData['stockQuantity']);
+                    final nextQuantity = currentStock + quantity;
+                    developer.log('FirestoreOrderRepository: Restoring product ${productRef.id} stock from $currentStock to $nextQuantity', name: 'OrderCancelTrace');
+                    transaction.update(productRef, {
+                      'stockQuantity': FieldValue.increment(quantity),
+                      if (nextQuantity > 0) 'isAvailable': true,
+                      'updatedAt': FieldValue.serverTimestamp(),
+                    });
                   }
                 }
+              } else {
+                developer.log('FirestoreOrderRepository: Product ${productRef.id} doc not found', name: 'OrderCancelTrace');
               }
             }
           }

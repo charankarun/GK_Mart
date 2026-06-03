@@ -13,6 +13,7 @@ class Product {
     this.stockQuantity,
     this.trackStock = false,
     this.lowStockThreshold = 5,
+    this.quantityValue,
     this.createdAt,
     this.updatedAt,
   });
@@ -30,6 +31,7 @@ class Product {
   final int? stockQuantity;
   final bool trackStock;
   final int lowStockThreshold;
+  final double? quantityValue;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -58,6 +60,23 @@ class Product {
     return price;
   }
 
+  String get formattedQuantityUnit {
+    if (quantityValue == null || unit.trim().isEmpty) return '';
+    final qty = quantityValue!;
+    final qtyStr = qty == qty.toInt() ? qty.toInt().toString() : qty.toString();
+    final u = unit.trim();
+    final uLower = u.toLowerCase();
+    if (qty > 1) {
+      if (uLower == 'piece') return '$qtyStr Pieces';
+      if (uLower == 'pack') return '$qtyStr Packs';
+      if (uLower == 'packet') return '$qtyStr Packets';
+      if (uLower == 'bottle') return '$qtyStr Bottles';
+      if (uLower == 'box') return '$qtyStr Boxes';
+      if (uLower == 'dozen') return '$qtyStr Dozens';
+    }
+    return '$qtyStr $u';
+  }
+
   Product copyWith({
     String? id,
     String? name,
@@ -74,6 +93,8 @@ class Product {
     bool? trackStock,
     bool clearStockQuantity = false,
     int? lowStockThreshold,
+    double? quantityValue,
+    bool clearQuantityValue = false,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -93,6 +114,8 @@ class Product {
           clearStockQuantity ? null : stockQuantity ?? this.stockQuantity,
       trackStock: trackStock ?? this.trackStock,
       lowStockThreshold: lowStockThreshold ?? this.lowStockThreshold,
+      quantityValue:
+          clearQuantityValue ? null : quantityValue ?? this.quantityValue,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

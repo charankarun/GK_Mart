@@ -236,31 +236,22 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
       }
     }
 
-    final input = await showDialog<AdminProductInput>(
+    final saved = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (_) => _ProductFormDialog(
         product: product,
         initialBarcode: initialBarcode,
       ),
     );
 
-    if (input == null || !mounted) return;
+    if (saved != true || !mounted) return;
 
-    try {
-      await ref.read(adminProductListProvider.notifier).saveProduct(input);
-      if (!mounted) return;
-      _showMessage(
-        product == null
-            ? ProductManagementText.addSuccess
-            : ProductManagementText.updateSuccess,
-      );
-    } catch (error) {
-      AppErrorHandler.showErrorSnackBar(
-        context,
-        error,
-        fallbackMessage: ProductManagementText.saveError,
-      );
-    }
+    _showMessage(
+      product == null
+          ? ProductManagementText.addSuccess
+          : ProductManagementText.updateSuccess,
+    );
   }
 
   List<Product> _visibleProducts(List<Product> products) {
@@ -794,6 +785,17 @@ class _ProductCard extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    if (product.formattedQuantityUnit.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        product.formattedQuantityUnit,
+                        style: const TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 6,
@@ -1592,7 +1594,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
   final _formKey = GlobalKey<FormState>();
   final _imagePicker = ImagePicker();
   late final TextEditingController _nameController;
-  late final TextEditingController _unitController;
+  late final TextEditingController _quantityValueController;
   late final TextEditingController _barcodeController;
   late final TextEditingController _priceController;
   late final TextEditingController _discountPriceController;
@@ -1601,6 +1603,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
   late bool _isAvailable;
   late bool _trackStock;
   String? _selectedCategoryId;
+  String? _selectedUnit;
   Uint8List? _imageBytes;
   String? _imageFileName;
   String _imageContentType = ProductProviderConfig.defaultImageContentType;
@@ -1608,6 +1611,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
   String? _barcodeLookupMessage;
   bool _isPickingImage = false;
   bool _isLookingUpBarcode = false;
+  bool _isSaving = false;
 
   @override
   void initState() {
@@ -1615,7 +1619,14 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     final product = widget.product;
 
     _nameController = TextEditingController(text: product?.name ?? '');
-    _unitController = TextEditingController(text: product?.unit ?? '');
+    _quantityValueController = TextEditingController(
+      text: product?.quantityValue == null
+          ? ''
+          : (product!.quantityValue == product.quantityValue!.toInt()
+              ? product.quantityValue!.toInt().toString()
+              : product.quantityValue!.toString()),
+    );
+    _selectedUnit = product?.unit ?? '';
     _barcodeController = TextEditingController(
       text: product?.barcode ?? widget.initialBarcode.trim(),
     );
@@ -1647,7 +1658,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
   @override
   void dispose() {
     _nameController.dispose();
-    _unitController.dispose();
+    _quantityValueController.dispose();
     _barcodeController.dispose();
     _priceController.dispose();
     _discountPriceController.dispose();
@@ -1661,123 +1672,199 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     final isEditing = widget.product != null;
     final categoriesAsync = ref.watch(categoriesStreamProvider);
 
-    return AlertDialog(
-      title: Text(
-        isEditing
-            ? ProductManagementText.editProduct
-            : ProductManagementText.addProduct,
-      ),
-      content: SizedBox(
-        width: ProductManagementConfig.formWidth,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _TextFormInput(
-                  controller: _nameController,
-                  label: ProductManagementText.nameLabel,
-                  validator: _requiredText,
-                ),
-                const SizedBox(height: 12),
-                _buildCategoryDropdown(categoriesAsync),
-                const SizedBox(height: 12),
-                _BarcodeFormInput(
-                  controller: _barcodeController,
-                  isLookingUp: _isLookingUpBarcode,
-                  lookupMessage: _barcodeLookupMessage,
-                  onScan: _scanBarcode,
-                ),
-                const SizedBox(height: 12),
-                _TextFormInput(
-                  controller: _priceController,
-                  label: ProductManagementText.mrpLabel,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+    return PopScope(
+      canPop: !_isSaving,
+      child: AlertDialog(
+        title: Text(
+          isEditing
+              ? ProductManagementText.editProduct
+              : ProductManagementText.addProduct,
+        ),
+        content: SizedBox(
+          width: ProductManagementConfig.formWidth,
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _TextFormInput(
+                    controller: _nameController,
+                    label: ProductManagementText.nameLabel,
+                    validator: _requiredText,
                   ),
-                  validator: _requiredPositivePrice,
-                ),
-                const SizedBox(height: 12),
-                _TextFormInput(
-                  controller: _discountPriceController,
-                  label: ProductManagementText.sellingPriceLabel,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+                  const SizedBox(height: 12),
+                  _buildCategoryDropdown(categoriesAsync),
+                  const SizedBox(height: 12),
+                  _BarcodeFormInput(
+                    controller: _barcodeController,
+                    isLookingUp: _isLookingUpBarcode,
+                    lookupMessage: _barcodeLookupMessage,
+                    onScan: _scanBarcode,
                   ),
-                  helperText: ProductManagementText.sellingPriceHelp,
-                  validator: _sellingPriceValidator,
-                ),
-                const SizedBox(height: 12),
-                _TextFormInput(
-                  controller: _unitController,
-                  label: ProductManagementText.unitLabel,
-                  helperText: ProductManagementText.unitHelp,
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text(ProductManagementText.trackStock),
-                  subtitle: const Text(ProductManagementText.trackStockHelp),
-                  value: _trackStock,
-                  onChanged: (value) {
-                    setState(() => _trackStock = value);
-                  },
-                ),
-                if (_trackStock) ...[
-                  const SizedBox(height: 8),
-                  _StockInputs(
-                    stockQuantityController: _stockQuantityController,
-                    lowStockThresholdController: _lowStockThresholdController,
-                    quantityValidator: _stockQuantityValidator,
-                    thresholdValidator: _lowStockThresholdValidator,
+                  const SizedBox(height: 12),
+                  _TextFormInput(
+                    controller: _priceController,
+                    label: ProductManagementText.mrpLabel,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    validator: _requiredPositivePrice,
+                  ),
+                  const SizedBox(height: 12),
+                  _TextFormInput(
+                    controller: _discountPriceController,
+                    label: ProductManagementText.sellingPriceLabel,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    helperText: ProductManagementText.sellingPriceHelp,
+                    validator: _sellingPriceValidator,
+                  ),
+                  const SizedBox(height: 12),
+                  _TextFormInput(
+                    controller: _quantityValueController,
+                    label: 'Quantity Value',
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    helperText: 'Example: 500, 1, 12',
+                    validator: (val) {
+                      if (val != null && val.trim().isNotEmpty) {
+                        final doubleVal = double.tryParse(val.trim());
+                        if (doubleVal == null || doubleVal < 0) {
+                          return 'Please enter a valid positive number';
+                        }
+                      }
+                      if ((_selectedUnit != null && _selectedUnit!.isNotEmpty) && (val == null || val.trim().isEmpty)) {
+                        return 'Quantity value is required if unit is selected';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: _selectedUnit,
+                    decoration: InputDecoration(
+                      labelText: 'Unit',
+                      helperText: 'Select the packaging unit (e.g. ml, Kg)',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(AppRadii.md),
+                      ),
+                    ),
+                    items: () {
+                      final currentUnit = _selectedUnit ?? '';
+                      final dropdownUnits = [
+                        '',
+                        'Kg',
+                        'g',
+                        'L',
+                        'ml',
+                        'Pack',
+                        'Packet',
+                        'Piece',
+                        'Bottle',
+                        'Box',
+                        'Dozen',
+                      ];
+                      if (currentUnit.isNotEmpty && !dropdownUnits.contains(currentUnit)) {
+                        dropdownUnits.add(currentUnit);
+                      }
+                      return dropdownUnits.map((unit) {
+                        return DropdownMenuItem<String>(
+                          value: unit,
+                          child: Text(unit.isEmpty ? 'None' : unit),
+                        );
+                      }).toList();
+                    }(),
+                    onChanged: _isSaving
+                        ? null
+                        : (val) {
+                            setState(() {
+                              _selectedUnit = val;
+                            });
+                          },
+                    validator: (val) {
+                      if ((val == null || val.isEmpty) && _quantityValueController.text.trim().isNotEmpty) {
+                        return 'Unit is required if quantity value is entered';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(ProductManagementText.trackStock),
+                    subtitle: const Text(ProductManagementText.trackStockHelp),
+                    value: _trackStock,
+                    onChanged: _isSaving ? null : (value) {
+                      setState(() => _trackStock = value);
+                    },
+                  ),
+                  if (_trackStock) ...[
+                    const SizedBox(height: 8),
+                    _StockInputs(
+                      stockQuantityController: _stockQuantityController,
+                      lowStockThresholdController: _lowStockThresholdController,
+                      quantityValidator: _stockQuantityValidator,
+                      thresholdValidator: _lowStockThresholdValidator,
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  _ImagePickerField(
+                    imageBytes: _imageBytes,
+                    imageUrl: widget.product?.imageUrl ?? '',
+                    isPickingImage: _isPickingImage,
+                    errorText: _imageError,
+                    onPickImage: _isSaving ? () {} : _pickImage,
+                    onViewImage: () {
+                      _showProductImagePreview(
+                        context,
+                        imageBytes: _imageBytes,
+                        imageUrl: widget.product?.imageUrl ?? '',
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 4),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(ProductManagementText.stockStatus),
+                    subtitle: Text(
+                      _isAvailable
+                          ? ProductManagementText.available
+                          : ProductManagementText.outOfStock,
+                    ),
+                    value: _isAvailable,
+                    onChanged: _isSaving ? null : (value) {
+                      setState(() => _isAvailable = value);
+                    },
                   ),
                 ],
-                const SizedBox(height: 12),
-                _ImagePickerField(
-                  imageBytes: _imageBytes,
-                  imageUrl: widget.product?.imageUrl ?? '',
-                  isPickingImage: _isPickingImage,
-                  errorText: _imageError,
-                  onPickImage: _pickImage,
-                  onViewImage: () {
-                    _showProductImagePreview(
-                      context,
-                      imageBytes: _imageBytes,
-                      imageUrl: widget.product?.imageUrl ?? '',
-                    );
-                  },
-                ),
-                const SizedBox(height: 4),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text(ProductManagementText.stockStatus),
-                  subtitle: Text(
-                    _isAvailable
-                        ? ProductManagementText.available
-                        : ProductManagementText.outOfStock,
-                  ),
-                  value: _isAvailable,
-                  onChanged: (value) {
-                    setState(() => _isAvailable = value);
-                  },
-                ),
-              ],
+              ),
             ),
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: _isSaving ? null : () => Navigator.pop(context),
+            child: const Text(ProductManagementText.cancel),
+          ),
+          ElevatedButton.icon(
+            onPressed: _isSaving ? null : _submit,
+            icon: _isSaving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.save_outlined),
+            label: const Text(ProductManagementText.save),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text(ProductManagementText.cancel),
-        ),
-        ElevatedButton.icon(
-          onPressed: _submit,
-          icon: const Icon(Icons.save_outlined),
-          label: const Text(ProductManagementText.save),
-        ),
-      ],
     );
   }
 
@@ -1954,7 +2041,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     }
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final isFormValid = _formKey.currentState?.validate() == true;
     final hasImage = _imageBytes != null ||
         (widget.product?.imageUrl.trim().isNotEmpty ?? false);
@@ -1963,7 +2050,11 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
       _imageError = hasImage ? null : ProductManagementText.imageRequired;
     });
 
-    if (!isFormValid || !hasImage) return;
+    if (!isFormValid || !hasImage || _isSaving) return;
+
+    setState(() {
+      _isSaving = true;
+    });
 
     final mrp = double.parse(_priceController.text.trim());
     final sellingPrice = double.parse(_discountPriceController.text.trim());
@@ -1971,32 +2062,46 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
         ? int.tryParse(_stockQuantityController.text.trim()) ?? 0
         : null;
 
-    Navigator.pop(
-      context,
-      AdminProductInput(
-        productId: widget.product?.id,
-        name: _nameController.text.trim(),
-        categoryId: _selectedCategoryId!.trim(),
-        price: mrp,
-        discountPrice: sellingPrice < mrp ? sellingPrice : 0,
-        existingImageUrl: widget.product?.imageUrl ?? '',
-        isAvailable: _trackStock && stockQuantity != null
-            ? stockQuantity > 0
-            : _isAvailable,
-        unit: _unitController.text.trim(),
-        barcode: _barcodeController.text.trim(),
-        brand: widget.product?.brand ?? '',
-        trackStock: _trackStock,
-        stockQuantity: stockQuantity,
-        lowStockThreshold: _trackStock
-            ? int.tryParse(_lowStockThresholdController.text.trim()) ??
-                ProductManagementConfig.lowStockThreshold
-            : ProductManagementConfig.lowStockThreshold,
-        imageBytes: _imageBytes,
-        imageFileName: _imageFileName,
-        imageContentType: _imageContentType,
-      ),
+    final input = AdminProductInput(
+      productId: widget.product?.id,
+      name: _nameController.text.trim(),
+      categoryId: _selectedCategoryId!.trim(),
+      price: mrp,
+      discountPrice: sellingPrice < mrp ? sellingPrice : 0,
+      existingImageUrl: widget.product?.imageUrl ?? '',
+      isAvailable: _trackStock && stockQuantity != null
+          ? stockQuantity > 0
+          : _isAvailable,
+      unit: _selectedUnit ?? '',
+      barcode: _barcodeController.text.trim(),
+      brand: widget.product?.brand ?? '',
+      trackStock: _trackStock,
+      stockQuantity: stockQuantity,
+      lowStockThreshold: _trackStock
+          ? int.tryParse(_lowStockThresholdController.text.trim()) ??
+              ProductManagementConfig.lowStockThreshold
+          : ProductManagementConfig.lowStockThreshold,
+      quantityValue: double.tryParse(_quantityValueController.text.trim()),
+      imageBytes: _imageBytes,
+      imageFileName: _imageFileName,
+      imageContentType: _imageContentType,
     );
+
+    try {
+      await ref.read(adminProductListProvider.notifier).saveProduct(input);
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+      });
+      AppErrorHandler.showErrorSnackBar(
+        context,
+        error,
+        fallbackMessage: ProductManagementText.saveError,
+      );
+    }
   }
 
   String? _requiredText(String? value) {
