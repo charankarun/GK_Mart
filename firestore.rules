@@ -519,9 +519,17 @@ service cloud.firestore {
           || get(/databases/$(database)/documents/store_settings/config).data.get('storeEnabled', false) == true
         );
       allow read: if isAdmin() || (signedIn() && (resource == null || resource.data.userId == request.auth.uid));
-      allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
-        && validOrderStatus(request.resource.data.status);
+      allow update: if (
+          isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && validOrderStatus(request.resource.data.status)
+        ) || (
+          signedIn()
+          && resource.data.userId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'timestamp'])
+          && request.resource.data.status == 'Cancelled'
+          && resource.data.status in ['Placed', 'Order Confirmed', 'Packed']
+        );
       allow delete: if false;
     }
 
@@ -557,7 +565,16 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if true;
       allow create: if isAdmin() && validProductCreate();
-      allow update: if isAdmin() && validProductUpdate();
+      allow update: if (isAdmin() && validProductUpdate())
+        || (
+          signedIn()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockQuantity', 'isAvailable', 'updatedAt'])
+          && request.resource.data.get('stockQuantity', 0) is number
+          && resource.data.get('stockQuantity', 0) is number
+          && request.resource.data.get('stockQuantity', 0) > resource.data.get('stockQuantity', 0)
+          && request.resource.data.get('isAvailable', true) == true
+          && request.resource.data.get('updatedAt', request.time) == request.time
+        );
       allow delete: if isAdmin();
     }
 

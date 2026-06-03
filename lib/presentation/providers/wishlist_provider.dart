@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../../domain/entities/product.dart';
+import 'catalog_providers.dart';
 import 'repository_providers.dart';
 
 final wishlistProductIdsProvider =
@@ -21,14 +22,22 @@ final wishlistPendingProductIdsProvider =
 
 final wishlistProductIdSetProvider = Provider.family<Set<String>, String>(
   (ref, userId) {
-    final productIds = ref.watch(wishlistProductIdsProvider(userId)).maybeWhen(
-          data: (productIds) => productIds.toSet(),
-          orElse: () => <String>{},
+    final rawProductIds = ref.watch(wishlistProductIdsProvider(userId)).maybeWhen(
+          data: (ids) => ids,
+          orElse: () => const <String>[],
         );
+
+    final existingProductsAsync = ref.watch(productsByIdsProvider(ProductIdsRequest(rawProductIds)));
+    final existingProductIds = existingProductsAsync.maybeWhen(
+          data: (products) => products.map((p) => p.id).toSet(),
+          orElse: () => rawProductIds.toSet(),
+        );
+
     final optimisticChanges = ref.watch(
       _wishlistOptimisticChangesProvider(userId),
     );
 
+    final productIds = {...existingProductIds};
     for (final change in optimisticChanges.entries) {
       if (change.value) {
         productIds.add(change.key);
@@ -56,7 +65,7 @@ final wishlistProductsProvider =
       }
 
       return ref.watch(
-        _productsByIdsProvider(_ProductIdsRequest(productIds)),
+        productsByIdsProvider(ProductIdsRequest(productIds)),
       );
     },
     loading: () => const AsyncLoading<List<Product>>(),
@@ -199,30 +208,4 @@ final removeWishlistProductProvider = Provider<RemoveWishlistProduct>((ref) {
   };
 });
 
-final _productsByIdsProvider =
-    StreamProvider.family<List<Product>, _ProductIdsRequest>((ref, request) {
-  return ref.watch(productRepositoryProvider).watchProductsByIds(request.ids);
-});
 
-class _ProductIdsRequest {
-  _ProductIdsRequest(List<String> ids) : ids = List.unmodifiable(ids);
-
-  final List<String> ids;
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    if (other is! _ProductIdsRequest || ids.length != other.ids.length) {
-      return false;
-    }
-
-    for (var index = 0; index < ids.length; index += 1) {
-      if (ids[index] != other.ids[index]) return false;
-    }
-
-    return true;
-  }
-
-  @override
-  int get hashCode => Object.hashAll(ids);
-}

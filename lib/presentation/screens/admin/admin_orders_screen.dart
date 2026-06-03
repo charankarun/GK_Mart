@@ -700,7 +700,7 @@ class _AdminOrderCard extends StatelessWidget {
                   child: Text(status),
                 );
               }).toList(),
-              onChanged: isUpdating
+              onChanged: (isUpdating || effectiveStatus == OrderStatus.cancelled)
                   ? null
                   : (status) {
                       if (status == null || status == effectiveStatus) {
@@ -1255,6 +1255,11 @@ class _OrderStatusStyle {
           foreground: AppColors.accent,
           background: AppColors.softOrange,
         );
+      case OrderStatus.confirmed:
+        return _OrderStatusStyle(
+          foreground: AppColors.accent,
+          background: AppColors.softOrange,
+        );
       case OrderStatus.packed:
         return _OrderStatusStyle(
           foreground: AppColors.info,
@@ -1269,6 +1274,11 @@ class _OrderStatusStyle {
         return _OrderStatusStyle(
           foreground: AppColors.success,
           background: AppColors.softGreen,
+        );
+      case OrderStatus.cancelled:
+        return _OrderStatusStyle(
+          foreground: AppColors.danger,
+          background: AppColors.danger.withValues(alpha: 0.1),
         );
     }
 

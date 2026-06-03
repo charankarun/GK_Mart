@@ -201,3 +201,31 @@ class CatalogProviderConfig {
 
   static const productPageSize = 20;
 }
+
+class ProductIdsRequest {
+  ProductIdsRequest(List<String> ids) : ids = List.unmodifiable(ids);
+
+  final List<String> ids;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! ProductIdsRequest || ids.length != other.ids.length) {
+      return false;
+    }
+
+    for (var index = 0; index < ids.length; index += 1) {
+      if (ids[index] != other.ids[index]) return false;
+    }
+
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAll(ids);
+}
+
+final productsByIdsProvider = StreamProvider.family<List<Product>, ProductIdsRequest>((ref, request) {
+  return ref.watch(productRepositoryProvider).watchProductsByIds(request.ids);
+});
+

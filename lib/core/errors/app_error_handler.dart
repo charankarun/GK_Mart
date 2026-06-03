@@ -4,7 +4,9 @@ import 'dart:developer' as developer;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
+import '../../presentation/navigation/notification_navigation_service.dart';
 import 'repository_exception.dart';
 
 class AppErrorHandler {
@@ -38,18 +40,42 @@ class AppErrorHandler {
   }
 
   static void showGlobalError(Object? error, {String? fallbackMessage}) {
-    final messenger = scaffoldMessengerKey.currentState;
-    if (messenger == null) return;
-    if (isPermissionDenied(error)) {
-      messenger.clearSnackBars();
-      return;
-    }
+    try {
+      final messenger = scaffoldMessengerKey.currentState;
+      if (messenger == null || !messenger.mounted) {
+        return;
+      }
 
-    messenger
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(content: Text(messageFor(error, fallback: fallbackMessage))),
-      );
+      final navContext = NotificationNavigationService.navigatorKey.currentContext;
+      if (navContext == null || !navContext.mounted) {
+        return;
+      }
+
+      ScaffoldMessengerState? safeMessenger;
+      try {
+        safeMessenger = ScaffoldMessenger.maybeOf(navContext);
+      } catch (_) {
+        // Suppress and fallback
+      }
+
+      if (safeMessenger == null || safeMessenger != messenger || !safeMessenger.mounted) {
+        return;
+      }
+
+      final schedulerPhase = SchedulerBinding.instance.schedulerPhase;
+      final isBuilding = schedulerPhase == SchedulerPhase.persistentCallbacks ||
+                         schedulerPhase == SchedulerPhase.midFrameMicrotasks;
+
+      if (isBuilding) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _safeShowSnackBar(messenger, error, fallbackMessage);
+        });
+      } else {
+        _safeShowSnackBar(messenger, error, fallbackMessage);
+      }
+    } catch (e, s) {
+      _logError('Secondary error in showGlobalError', e, s);
+    }
   }
 
   static void showErrorSnackBar(
@@ -57,19 +83,48 @@ class AppErrorHandler {
     Object? error, {
     String? fallbackMessage,
   }) {
-    if (!context.mounted) return;
+    try {
+      if (!context.mounted) return;
 
-    final messenger = ScaffoldMessenger.of(context);
-    if (isPermissionDenied(error)) {
-      messenger.clearSnackBars();
-      return;
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      if (messenger == null || !messenger.mounted) return;
+
+      final schedulerPhase = SchedulerBinding.instance.schedulerPhase;
+      final isBuilding = schedulerPhase == SchedulerPhase.persistentCallbacks ||
+                         schedulerPhase == SchedulerPhase.midFrameMicrotasks;
+
+      if (isBuilding) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _safeShowSnackBar(messenger, error, fallbackMessage);
+        });
+      } else {
+        _safeShowSnackBar(messenger, error, fallbackMessage);
+      }
+    } catch (e, s) {
+      _logError('Failed to handle showErrorSnackBar', e, s);
     }
+  }
 
-    messenger
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(content: Text(messageFor(error, fallback: fallbackMessage))),
-      );
+  static void _safeShowSnackBar(
+    ScaffoldMessengerState messenger,
+    Object? error,
+    String? fallbackMessage,
+  ) {
+    try {
+      if (!messenger.mounted) return;
+      if (isPermissionDenied(error)) {
+        messenger.clearSnackBars();
+        return;
+      }
+
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(content: Text(messageFor(error, fallback: fallbackMessage))),
+        );
+    } catch (e, s) {
+      _logError('Failed to display SnackBar safely', e, s);
+    }
   }
 
   static bool isPermissionDenied(Object? error) {

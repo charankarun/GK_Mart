@@ -6,6 +6,7 @@ import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/cart_pricing.dart';
 import '../navigation/customer_navigation_scope.dart';
 import '../providers/auth_providers.dart';
+import '../providers/catalog_providers.dart';
 import '../providers/commerce_providers.dart';
 import '../widgets/app_cached_network_image.dart';
 import 'checkout_screen.dart';
@@ -42,10 +43,19 @@ class CartScreen extends ConsumerWidget {
                     separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final item = cartItems[index];
+                      final productsAsync = ref.watch(productsByIdsProvider(ProductIdsRequest([item.productId])));
+                      final product = productsAsync.maybeWhen(
+                        data: (list) {
+                          final idx = list.indexWhere((p) => p.id == item.productId);
+                          return idx != -1 ? list[idx] : null;
+                        },
+                        orElse: () => null,
+                      );
+                      final isMax = product != null && product.trackStock && item.quantity >= (product.stockQuantity ?? 0);
 
                       return _CartItemCard(
                         item: item,
-                        onIncrement: () {
+                        onIncrement: isMax ? null : () {
                           cartController.increment(item.productId);
                         },
                         onDecrement: () {
@@ -86,7 +96,7 @@ class _CartItemCard extends StatelessWidget {
   });
 
   final CartItem item;
-  final VoidCallback onIncrement;
+  final VoidCallback? onIncrement;
   final VoidCallback onDecrement;
   final VoidCallback onRemove;
 
@@ -260,7 +270,7 @@ class _QuantityStepper extends StatelessWidget {
   });
 
   final int quantity;
-  final VoidCallback onIncrement;
+  final VoidCallback? onIncrement;
   final VoidCallback onDecrement;
 
   @override
@@ -308,7 +318,7 @@ class _QuantityButton extends StatelessWidget {
   });
 
   final IconData icon;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -318,7 +328,11 @@ class _QuantityButton extends StatelessWidget {
       child: SizedBox(
         width: 34,
         height: 36,
-        child: Icon(icon, color: Colors.white, size: 18),
+        child: Icon(
+          icon,
+          color: onTap == null ? Colors.white.withValues(alpha: 0.4) : Colors.white,
+          size: 18,
+        ),
       ),
     );
   }

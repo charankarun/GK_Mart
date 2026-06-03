@@ -261,8 +261,8 @@ class OrderNotificationCopy {
         );
       case OrderStatus.cancelled:
         return OrderNotificationCopy(
-          title: 'Order Cancelled',
-          body: 'Your order$orderSuffix has been cancelled.',
+          title: 'Order Cancelled Successfully',
+          body: 'Order Cancelled Successfully',
         );
     }
 

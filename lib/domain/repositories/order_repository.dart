@@ -63,4 +63,9 @@ abstract class OrderRepository {
     required String orderId,
     required String status,
   });
+
+  Future<void> cancelOrder({
+    required String orderId,
+    required String userId,
+  });
 }

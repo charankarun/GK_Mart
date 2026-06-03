@@ -84,6 +84,19 @@ class ProductDetailScreen extends ConsumerWidget {
                     product.unit,
                     style: const TextStyle(color: Colors.grey),
                   ),
+                  if (product.trackStock &&
+                      (product.stockQuantity ?? 0) <= 10 &&
+                      (product.stockQuantity ?? 0) > 0) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Only ${product.stockQuantity} left!',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: AppColors.danger,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   const Text(
                     'Fresh and high quality product. Delivered fast to your home.',
@@ -105,9 +118,12 @@ class ProductDetailScreen extends ConsumerWidget {
                         ),
                         IconButton(
                           icon: const Icon(Icons.add),
-                          onPressed: () {
-                            cartController.increment(product.id);
-                          },
+                          onPressed: (product.trackStock &&
+                                  quantity >= (product.stockQuantity ?? 0))
+                              ? null
+                              : () {
+                                  cartController.increment(product.id);
+                                },
                         ),
                       ],
                     ),
@@ -123,17 +139,23 @@ class ProductDetailScreen extends ConsumerWidget {
                 backgroundColor: AppColors.primary,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              onPressed: !product.isAvailable
+              onPressed: (!product.isAvailable ||
+                      product.isStockEmpty ||
+                      (product.trackStock &&
+                          quantity >= (product.stockQuantity ?? 0)))
                   ? null
                   : () {
                       cartController.addProduct(product);
                     },
               child: Text(
-                !product.isAvailable
+                (!product.isAvailable || product.isStockEmpty)
                     ? 'Out of Stock'
-                    : quantity == 0
-                        ? 'Add to Cart'
-                        : 'Add More',
+                    : (product.trackStock &&
+                            quantity >= (product.stockQuantity ?? 0))
+                        ? 'Limit Reached'
+                        : quantity == 0
+                            ? 'Add to Cart'
+                            : 'Add More',
                 style: const TextStyle(fontSize: 16),
               ),
             ),

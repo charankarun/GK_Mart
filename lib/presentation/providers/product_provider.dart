@@ -164,6 +164,7 @@ class AdminProductListController
         barcode: input.barcode,
         brand: input.brand,
         stockQuantity: input.stockQuantity,
+        trackStock: input.trackStock,
         lowStockThreshold: input.lowStockThreshold,
       );
 

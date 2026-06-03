@@ -1,9 +1,14 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/app_error_handler.dart';
+import '../../core/theme/app_theme.dart';
 import '../../domain/entities/customer_order.dart';
 import '../providers/order_providers.dart';
+import '../providers/repository_providers.dart';
+import '../widgets/app_cached_network_image.dart';
 import '../widgets/app_state_widgets.dart';
 
 class OrderDetailsScreen extends ConsumerWidget {
@@ -207,15 +212,7 @@ class OrderDetailsScreen extends ConsumerWidget {
                           itemCount: order.items.length,
                           itemBuilder: (context, index) {
                             final item = order.items[index];
-
-                            return Card(
-                              child: ListTile(
-                                title: Text(item.name),
-                                subtitle: Text(
-                                  '\u20B9${_formatPrice(item.price)} x ${item.quantity}',
-                                ),
-                              ),
-                            );
+                            return _OrderDetailItemRow(item: item);
                           },
                         ),
                 ),
@@ -228,6 +225,32 @@ class OrderDetailsScreen extends ConsumerWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                if (OrderStatus.normalize(order.status) == OrderStatus.placed ||
+                    OrderStatus.normalize(order.status) == OrderStatus.confirmed ||
+                    OrderStatus.normalize(order.status) == OrderStatus.packed) ...[
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.danger,
+                        side: const BorderSide(color: AppColors.danger, width: 1.5),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () => _showCancelConfirmation(context, ref, order),
+                      child: const Text(
+                        'Cancel Order',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           );
@@ -242,6 +265,175 @@ class OrderDetailsScreen extends ConsumerWidget {
           ),
           onRetry: () => ref.invalidate(orderDetailsProvider(orderId)),
         ),
+      ),
+    );
+  }
+
+  String _formatPrice(double price) {
+    return price % 1 == 0 ? price.toStringAsFixed(0) : price.toStringAsFixed(2);
+  }
+
+  void _showCancelConfirmation(BuildContext context, WidgetRef ref, Order order) {
+    developer.log('OrderDetailsScreen: _showCancelConfirmation dialog triggered for order: ${order.id}', name: 'OrderCancelTrace');
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Cancel this order?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                developer.log('OrderDetailsScreen: Confirmation dialog dismissed with No', name: 'OrderCancelTrace');
+                Navigator.pop(context);
+              },
+              child: const Text('No'),
+            ),
+            TextButton(
+              onPressed: () async {
+                developer.log('OrderDetailsScreen: Confirmation dialog confirmed with Yes, Cancel Order', name: 'OrderCancelTrace');
+                Navigator.pop(context);
+                _cancelOrder(context, ref, order);
+              },
+              child: const Text(
+                'Yes, Cancel Order',
+                style: TextStyle(color: AppColors.danger),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _cancelOrder(BuildContext context, WidgetRef ref, Order order) async {
+    developer.log('OrderDetailsScreen: _cancelOrder started execution for order: ${order.id}', name: 'OrderCancelTrace');
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Cancelling order...')),
+    );
+
+    try {
+      developer.log('OrderDetailsScreen: Invoking cancelOrder on OrderRepository', name: 'OrderCancelTrace');
+      await ref.read(orderRepositoryProvider).cancelOrder(
+            orderId: order.id,
+            userId: order.userId,
+          );
+      developer.log('OrderDetailsScreen: cancelOrder call returned successfully', name: 'OrderCancelTrace');
+      
+      if (context.mounted) {
+        developer.log('OrderDetailsScreen: Showing success SnackBar', name: 'OrderCancelTrace');
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Order Cancelled Successfully')),
+        );
+      }
+    } catch (e, stackTrace) {
+      developer.log(
+        'OrderDetailsScreen: Exception caught during cancellation',
+        name: 'OrderCancelTrace',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        AppErrorHandler.showErrorSnackBar(
+          context,
+          e,
+          fallbackMessage: 'Failed to cancel order.',
+        );
+      }
+    }
+  }
+}
+
+class _OrderDetailItemRow extends StatelessWidget {
+  const _OrderDetailItemRow({required this.item});
+
+  final OrderItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmedUrl = item.imageUrl.trim();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.soft,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppColors.softGreen,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              child: AppCachedNetworkImage(
+                imageUrl: trimmedUrl,
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.medium,
+                placeholder: const AppImagePlaceholder(iconSize: 22),
+                errorPlaceholder: const AppImagePlaceholder(iconSize: 22),
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '\u20B9${_formatPrice(item.effectivePrice)}${item.unit.isNotEmpty ? " / ${item.unit}" : ""}',
+                  style: const TextStyle(
+                    color: AppColors.mutedText,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                'Qty: ${item.quantity}',
+                style: const TextStyle(
+                  color: AppColors.text,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '\u20B9${_formatPrice(item.lineTotal)}',
+                style: const TextStyle(
+                  color: AppColors.primary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

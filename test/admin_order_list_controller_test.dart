@@ -83,6 +83,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Orders - '), findsOneWidget);
   });
+
+  test('cancelOrder updates order status to Cancelled', () async {
+    final repository = _FakeOrderRepository([
+      Order(
+        id: 'GK00001',
+        userId: 'customer-1',
+        userName: 'Asha Rao',
+        phone: '+9199991111',
+        items: const <OrderItem>[],
+        totalAmount: 120,
+        totalSavings: 0,
+        address: 'Address 1',
+        status: OrderStatus.placed,
+        createdAt: DateTime(2026, 6, 1, 9),
+      ),
+    ]);
+    
+    await repository.cancelOrder(orderId: 'GK00001', userId: 'customer-1');
+    final orderPage = await repository.fetchAllOrdersPage(limit: 10);
+    expect(orderPage.orders.first.status, OrderStatus.cancelled);
+  });
 }
 
 List<String> _visibleOrderIds(ProviderContainer container) {
@@ -311,6 +332,28 @@ class _FakeOrderRepository implements OrderRepository {
     required String status,
   }) {
     throw UnimplementedError();
+  }
+
+  @override
+  Future<void> cancelOrder({
+    required String orderId,
+    required String userId,
+  }) async {
+    final index = _orders.indexWhere((order) => order.id == orderId);
+    if (index != -1) {
+      _orders[index] = Order(
+        id: _orders[index].id,
+        userId: _orders[index].userId,
+        userName: _orders[index].userName,
+        phone: _orders[index].phone,
+        items: _orders[index].items,
+        totalAmount: _orders[index].totalAmount,
+        totalSavings: _orders[index].totalSavings,
+        address: _orders[index].address,
+        status: OrderStatus.cancelled,
+        createdAt: _orders[index].createdAt,
+      );
+    }
   }
 
   @override

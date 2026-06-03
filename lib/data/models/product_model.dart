@@ -16,6 +16,7 @@ class ProductModel extends Product {
     super.barcode,
     super.brand,
     super.stockQuantity,
+    super.trackStock,
     super.lowStockThreshold,
     super.createdAt,
     super.updatedAt,
@@ -34,6 +35,7 @@ class ProductModel extends Product {
       barcode: product.barcode,
       brand: product.brand,
       stockQuantity: product.stockQuantity,
+      trackStock: product.trackStock,
       lowStockThreshold: product.lowStockThreshold,
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
@@ -57,6 +59,7 @@ class ProductModel extends Product {
       barcode: readString(data, ProductField.barcode),
       brand: readString(data, ProductField.brand),
       stockQuantity: _readStockQuantity(data),
+      trackStock: _readTrackStock(data),
       lowStockThreshold: _readLowStockThreshold(data),
       createdAt: readDateTime(data[ProductField.createdAt]),
       updatedAt: readDateTime(data[ProductField.updatedAt]),
@@ -84,6 +87,7 @@ class ProductModel extends Product {
       ProductField.discountPrice: discountPrice,
       ProductField.imageUrl: imageUrl.trim(),
       ProductField.isAvailable: isAvailable,
+      ProductField.trackStock: trackStock,
       if (barcode.trim().isNotEmpty)
         ProductField.barcode: barcode.trim()
       else if (includeDeletes)
@@ -142,6 +146,13 @@ class ProductModel extends Product {
     return quantity < 0 ? 0 : quantity;
   }
 
+  static bool _readTrackStock(Map<String, dynamic> data) {
+    final track = data[ProductField.trackStock];
+    if (track is bool) return track;
+    // Default to true if stockQuantity is present for legacy compatibility
+    return data[ProductField.stockQuantity] != null;
+  }
+
   static int _readLowStockThreshold(Map<String, dynamic> data) {
     final value = data[ProductField.lowStockThreshold];
     if (value == null) return 5;
@@ -182,6 +193,7 @@ class ProductField {
   static const discountPrice = 'discountPrice';
   static const imageUrl = 'imageUrl';
   static const isAvailable = 'isAvailable';
+  static const trackStock = 'trackStock';
   static const unit = 'unit';
   static const barcode = 'barcode';
   static const brand = 'brand';

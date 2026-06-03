@@ -1635,7 +1635,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     );
     _selectedCategoryId = product?.categoryId;
     _isAvailable = product?.isAvailable ?? true;
-    _trackStock = product == null || product.stockQuantity != null;
+    _trackStock = product?.trackStock ?? (product == null || product.stockQuantity != null);
 
     if (product == null && widget.initialBarcode.trim().isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2420,6 +2420,14 @@ class _StockStyle {
   final IconData icon;
 
   static _StockStyle resolve(Product product) {
+    if (!product.trackStock) {
+      return const _StockStyle(
+        label: ProductManagementText.stockNotTracked,
+        color: AppColors.mutedText,
+        icon: Icons.inventory_2_outlined,
+      );
+    }
+
     final quantity = product.stockQuantity;
     if (quantity == null) {
       return const _StockStyle(
@@ -2720,7 +2728,7 @@ class ProductManagementText {
   static const stock = 'Stock';
   static const lowStock = 'Low Stock';
   static const noStock = 'No stock left';
-  static const stockNotTracked = 'Stock not tracked';
+  static const stockNotTracked = 'Stock Tracking Disabled';
   static const available = 'Available';
   static const outOfStock = 'Out of Stock';
   static const deleteProduct = 'Delete Product';

@@ -4,11 +4,13 @@ import 'dart:developer' as developer;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
+import '../../domain/entities/app_user.dart';
 import '../../domain/entities/auth_session.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/cart_pricing.dart';
 import '../../domain/entities/product.dart';
 import 'auth_providers.dart';
+import 'catalog_providers.dart';
 import 'repository_providers.dart';
 
 final cartControllerProvider =
@@ -17,7 +19,19 @@ final cartControllerProvider =
 });
 
 final cartItemsProvider = Provider<List<CartItem>>((ref) {
-  return ref.watch(cartControllerProvider);
+  final rawItems = ref.watch(cartControllerProvider);
+  if (rawItems.isEmpty) return const <CartItem>[];
+
+  final productIds = rawItems.map((item) => item.productId).toList();
+  final existingProductsAsync = ref.watch(productsByIdsProvider(ProductIdsRequest(productIds)));
+
+  return existingProductsAsync.maybeWhen(
+    data: (products) {
+      final existingIds = products.map((p) => p.id).toSet();
+      return rawItems.where((item) => existingIds.contains(item.productId)).toList();
+    },
+    orElse: () => rawItems,
+  );
 });
 
 final cartItemCountProvider = Provider<int>((ref) {
@@ -60,6 +74,8 @@ class CartController extends StateNotifier<List<CartItem>> {
   String? _userId;
 
   void addProduct(Product product) {
+    if (product.trackStock && product.isStockEmpty) return;
+
     final previousState = state;
     final existingIndex = state.indexWhere((item) {
       return item.productId == product.id;
@@ -76,6 +92,11 @@ class CartController extends StateNotifier<List<CartItem>> {
 
     final nextItems = [...state];
     final existingItem = nextItems[existingIndex];
+    if (product.trackStock &&
+        existingItem.quantity >= (product.stockQuantity ?? 0)) {
+      return;
+    }
+
     nextItems[existingIndex] = existingItem.copyWith(
       name: product.name,
       price: product.price,
@@ -103,7 +124,24 @@ class CartController extends StateNotifier<List<CartItem>> {
 
   void increment(String productId) {
     final previousState = state;
-    if (_itemById(productId) == null) return;
+    final existingItem = _itemById(productId);
+    if (existingItem == null) return;
+
+    final productsAsync = _ref.read(
+        productsByIdsProvider(ProductIdsRequest([productId])));
+    final product = productsAsync.maybeWhen(
+      data: (list) {
+        final idx = list.indexWhere((p) => p.id == productId);
+        return idx != -1 ? list[idx] : null;
+      },
+      orElse: () => null,
+    );
+
+    if (product != null &&
+        product.trackStock &&
+        existingItem.quantity >= (product.stockQuantity ?? 0)) {
+      return;
+    }
 
     state = [
       for (final item in state)
@@ -248,3 +286,39 @@ void _logCartError(String message, Object error, StackTrace stackTrace) {
     stackTrace: stackTrace,
   );
 }
+
+final activeAddressProvider = StateNotifierProvider<ActiveAddressNotifier, String>((ref) {
+  return ActiveAddressNotifier(ref);
+});
+
+class ActiveAddressNotifier extends StateNotifier<String> {
+  ActiveAddressNotifier(this._ref) : super('') {
+    _ref.listen<AsyncValue<AppUser?>>(
+      currentUserProfileProvider,
+      (previous, next) {
+        final user = next.value;
+        if (user != null) {
+          if (state.isEmpty || !user.savedAddresses.contains(state)) {
+            state = user.address;
+          }
+        } else {
+          state = '';
+        }
+      },
+      fireImmediately: true,
+    );
+  }
+
+  final Ref _ref;
+
+  void selectAddress(String address) {
+    state = address;
+    final session = _ref.read(currentSessionProvider);
+    final user = _ref.read(currentUserProfileProvider).value;
+    if (session != null && user != null) {
+      final updatedUser = user.copyWith(address: address);
+      _ref.read(userRepositoryProvider).upsertUser(updatedUser);
+    }
+  }
+}
+

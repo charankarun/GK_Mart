@@ -35,16 +35,22 @@ class GkProductCard extends StatelessWidget {
 
     return Material(
       color: AppColors.card,
-      borderRadius: BorderRadius.circular(AppRadii.lg),
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Container(
           decoration: BoxDecoration(
             color: AppColors.card,
-            borderRadius: BorderRadius.circular(AppRadii.lg),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppColors.border),
-            boxShadow: AppShadows.card,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -54,13 +60,13 @@ class GkProductCard extends StatelessWidget {
                   _ProductImage(imageUrl: product.imageUrl),
                   if (hasDiscount)
                     Positioned(
-                      left: 8,
-                      top: 8,
+                      left: 6,
+                      top: 6,
                       child: _DiscountBadge(discountPercent: discountPercent),
                     ),
                   Positioned(
-                    right: 8,
-                    top: 8,
+                    right: 6,
+                    top: 6,
                     child: _WishlistButton(
                       isWishlisted: isWishlisted,
                       isLoading: isWishlistUpdating,
@@ -71,7 +77,7 @@ class GkProductCard extends StatelessWidget {
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  padding: const EdgeInsets.all(8),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -81,20 +87,52 @@ class GkProductCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: AppColors.text,
-                          fontSize: 13,
-                          height: 1.12,
-                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          height: 1.15,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
+                      if (product.unit.trim().isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          product.unit,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.mutedText,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                      if (product.trackStock &&
+                          (product.stockQuantity ?? 0) <= 10 &&
+                          (product.stockQuantity ?? 0) > 0) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Only ${product.stockQuantity} left!',
+                          style: const TextStyle(
+                            color: AppColors.danger,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                       const Spacer(),
-                      _PriceRow(product: product),
-                      const SizedBox(height: 7),
-                      _CartAction(
-                        isAvailable: product.isAvailable,
-                        quantity: quantity,
-                        onAdd: onAdd,
-                        onIncrement: onIncrement,
-                        onDecrement: onDecrement,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: _PriceCol(product: product),
+                          ),
+                          _CartAction(
+                            isAvailable: product.isAvailable && !product.isStockEmpty,
+                            quantity: quantity,
+                            onAdd: onAdd,
+                            onIncrement: (product.trackStock && quantity >= (product.stockQuantity ?? 0)) ? null : onIncrement,
+                            onDecrement: onDecrement,
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -115,20 +153,30 @@ class _ProductImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(
-        top: Radius.circular(AppRadii.lg),
+    return Container(
+      height: 110,
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(12),
+        ),
       ),
-      child: AspectRatio(
-        aspectRatio: 1.62,
-        child: AppCachedNetworkImage(
-          imageUrl: imageUrl,
-          fit: BoxFit.cover,
-          filterQuality: FilterQuality.medium,
-          memCacheWidth: ProductCardConfig.imageMemCacheWidth,
-          maxWidthDiskCache: ProductCardConfig.imageDiskCacheWidth,
-          placeholder: const _ImagePlaceholder(),
-          errorPlaceholder: const _ImagePlaceholder(),
+      padding: const EdgeInsets.all(8),
+      child: Center(
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(12),
+          ),
+          child: AppCachedNetworkImage(
+            imageUrl: imageUrl,
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.medium,
+            memCacheWidth: ProductCardConfig.imageMemCacheWidth,
+            maxWidthDiskCache: ProductCardConfig.imageDiskCacheWidth,
+            placeholder: const _ImagePlaceholder(),
+            errorPlaceholder: const _ImagePlaceholder(),
+          ),
         ),
       ),
     );
@@ -153,26 +201,28 @@ class _WishlistButton extends StatelessWidget {
           ? ProductCardText.removeFromWishlist
           : ProductCardText.addToWishlist,
       child: Material(
-        color: AppColors.card.withValues(alpha: 0.94),
+        color: Colors.white.withValues(alpha: 0.9),
         shape: const CircleBorder(),
+        elevation: 2,
+        shadowColor: Colors.black.withValues(alpha: 0.15),
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: isLoading ? null : onPressed,
           child: SizedBox(
-            width: 34,
-            height: 34,
+            width: 28,
+            height: 28,
             child: isLoading
                 ? const Padding(
-                    padding: EdgeInsets.all(9),
+                    padding: EdgeInsets.all(7),
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Icon(
                     isWishlisted
                         ? Icons.favorite_rounded
-                        : Icons.favorite_border,
+                        : Icons.favorite_border_rounded,
                     color:
-                        isWishlisted ? ProductCardColors.heart : AppColors.text,
-                    size: 20,
+                        isWishlisted ? ProductCardColors.heart : AppColors.mutedText,
+                    size: 16,
                   ),
           ),
         ),
@@ -192,7 +242,7 @@ class _ImagePlaceholder extends StatelessWidget {
         child: Icon(
           Icons.local_grocery_store_rounded,
           color: AppColors.primary,
-          size: 34,
+          size: 28,
         ),
       ),
     );
@@ -207,57 +257,51 @@ class _DiscountBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2.5),
       decoration: BoxDecoration(
         color: AppColors.accent,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.accent.withValues(alpha: 0.26),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
         '$discountPercent% OFF',
         style: const TextStyle(
           color: Colors.white,
-          fontSize: 9,
-          height: 1,
+          fontSize: 8.5,
           fontWeight: FontWeight.w900,
+          letterSpacing: 0.2,
         ),
       ),
     );
   }
 }
 
-class _PriceRow extends StatelessWidget {
-  const _PriceRow({required this.product});
+class _PriceCol extends StatelessWidget {
+  const _PriceCol({required this.product});
 
   final Product product;
 
   @override
   Widget build(BuildContext context) {
-    final hasDiscount = _discountPercent(product) > 0;
+    final discountPercent = _discountPercent(product);
+    final hasDiscount = discountPercent > 0;
 
-    return Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 7,
-      runSpacing: 2,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           '\u20B9${_formatPrice(product.sellingPrice)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
-            color: AppColors.primary,
-            fontSize: 15,
-            height: 1,
+            color: AppColors.text,
+            fontSize: 14,
+            height: 1.1,
             fontWeight: FontWeight.w900,
           ),
         ),
-        if (hasDiscount)
+        if (hasDiscount) ...[
+          const SizedBox(height: 2),
           Text(
             '\u20B9${_formatPrice(product.price)}',
             maxLines: 1,
@@ -265,10 +309,12 @@ class _PriceRow extends StatelessWidget {
             style: const TextStyle(
               color: AppColors.mutedText,
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              height: 1.1,
+              fontWeight: FontWeight.w600,
               decoration: TextDecoration.lineThrough,
             ),
           ),
+        ],
       ],
     );
   }
@@ -286,24 +332,27 @@ class _CartAction extends StatelessWidget {
   final bool isAvailable;
   final int quantity;
   final VoidCallback onAdd;
-  final VoidCallback onIncrement;
+  final VoidCallback? onIncrement;
   final VoidCallback onDecrement;
 
   @override
   Widget build(BuildContext context) {
     if (!isAvailable) {
       return Container(
-        height: 32,
+        width: 68,
+        height: 30,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: const Color(0xFFF3F4F6),
-          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
         ),
         child: const Text(
           'Out of Stock',
+          textAlign: TextAlign.center,
           style: TextStyle(
             color: AppColors.mutedText,
-            fontSize: 11,
+            fontSize: 9,
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -312,22 +361,26 @@ class _CartAction extends StatelessWidget {
 
     if (quantity <= 0) {
       return SizedBox(
-        width: double.infinity,
-        height: 32,
-        child: ElevatedButton.icon(
+        width: 68,
+        height: 30,
+        child: OutlinedButton(
           onPressed: onAdd,
-          icon: const Icon(Icons.add_shopping_cart_rounded, size: 15),
-          label: const Text('Add'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
+          style: OutlinedButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: AppColors.primary,
+            side: const BorderSide(color: AppColors.primary, width: 1.2),
             padding: EdgeInsets.zero,
-            textStyle: const TextStyle(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6),
+            ),
+            elevation: 1,
+            shadowColor: Colors.black.withValues(alpha: 0.1),
+          ),
+          child: const Text(
+            'ADD',
+            style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w900,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadii.md),
             ),
           ),
         ),
@@ -335,10 +388,18 @@ class _CartAction extends StatelessWidget {
     }
 
     return Container(
-      height: 32,
+      width: 68,
+      height: 30,
       decoration: BoxDecoration(
         color: AppColors.primary,
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        borderRadius: BorderRadius.circular(6),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.2),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -348,7 +409,7 @@ class _CartAction extends StatelessWidget {
             quantity.toString(),
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: FontWeight.w900,
             ),
           ),
@@ -366,17 +427,21 @@ class _QuantityButton extends StatelessWidget {
   });
 
   final IconData icon;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadii.md),
+      borderRadius: BorderRadius.circular(6),
       child: SizedBox(
-        width: 36,
-        height: 32,
-        child: Icon(icon, color: Colors.white, size: 17),
+        width: 22,
+        height: 30,
+        child: Icon(
+          icon,
+          color: onTap == null ? Colors.white.withValues(alpha: 0.4) : Colors.white,
+          size: 14,
+        ),
       ),
     );
   }

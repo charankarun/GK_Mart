@@ -15,6 +15,7 @@ import '../../domain/entities/order.dart';
 import '../providers/auth_providers.dart';
 import '../providers/commerce_providers.dart';
 import '../providers/order_providers.dart';
+import '../providers/repository_providers.dart';
 import '../providers/store_providers.dart';
 import 'address_screen.dart';
 import 'order_success_screen.dart';
@@ -54,6 +55,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       );
     }
 
+    final activeAddress = ref.watch(activeAddressProvider);
     final profile = ref.watch(currentUserProfileProvider).maybeWhen(
           data: (user) => user,
           orElse: () => null,
@@ -62,8 +64,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       hasSeededProfile = true;
       nameController.text = profile.name.trim();
       phoneController.text = _normalizedPhoneOrOriginal(profile.phone);
-      addressController.text = profile.address.trim();
-      pincodeController.text = _extractPincode(profile.address);
+      final seedAddress = activeAddress.isNotEmpty ? activeAddress : profile.address.trim();
+      addressController.text = seedAddress;
+      pincodeController.text = _extractPincode(seedAddress);
     }
 
     final cartItems = ref.watch(cartItemsProvider);
@@ -79,11 +82,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final String? storeClosedMessage;
     final bool isStoreClosed;
     if (storeConfig != null) {
-      if (!storeConfig.storeEnabled) {
-        storeClosedMessage = 'Store is temporarily unavailable. Please try again later.';
-        isStoreClosed = true;
-      } else if (!storeConfig.isOpen) {
-        storeClosedMessage = 'Store is currently closed. Reopens at ${storeConfig.formattedOpenTime}.';
+      if (!storeConfig.isOpen) {
+        storeClosedMessage = 'Store is currently closed.\nReopens at ${storeConfig.formattedOpenTime}.';
         isStoreClosed = true;
       } else {
         storeClosedMessage = null;
@@ -137,7 +137,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         _OrderItemsPreview(items: cartItems),
                         const SizedBox(height: 12),
                         _SavedAddressCard(
-                          address: profile?.address ?? '',
+                          address: activeAddress.isNotEmpty ? activeAddress : (profile?.address ?? ''),
                           onManageAddress: _openAddressScreen,
                         ),
                         const SizedBox(height: 12),
@@ -187,6 +187,35 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     if (cartItems.isEmpty) {
       _logCheckoutOrder('Stopped before order request: cart is empty.');
       return;
+    }
+
+    // Double check stock levels before placing the order
+    try {
+      final productIds = cartItems.map((item) => item.productId).toList();
+      final latestProducts = await ref.read(productRepositoryProvider).watchProductsByIds(productIds).first;
+      for (final cartItem in cartItems) {
+        final idx = latestProducts.indexWhere((p) => p.id == cartItem.productId);
+        if (idx != -1) {
+          final product = latestProducts[idx];
+          if (product.trackStock) {
+            final stock = product.stockQuantity ?? 0;
+            if (stock < cartItem.quantity) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context)
+                ..clearSnackBars()
+                ..showSnackBar(
+                  SnackBar(
+                    content: Text('Only $stock items available for this product.'),
+                    duration: const Duration(seconds: 5),
+                  ),
+                );
+              return;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      _logCheckoutOrder('Stock validation check failed dynamically: $e');
     }
 
     final normalizedPhone = PhoneNumberNormalizer.toIndianLocalNumber(
@@ -280,6 +309,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
     if (!mounted) return;
     if (savedAddress == null || savedAddress.trim().isEmpty) return;
+
+    ref.read(activeAddressProvider.notifier).selectAddress(savedAddress.trim());
 
     addressController.text = savedAddress.trim();
     final pincode = _extractPincode(savedAddress);

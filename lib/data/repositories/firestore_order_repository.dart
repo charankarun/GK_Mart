@@ -10,6 +10,7 @@ import '../../domain/entities/customer_order.dart';
 import '../../domain/entities/order_analytics.dart';
 import '../../domain/entities/order_page.dart';
 import '../../domain/repositories/order_repository.dart';
+import '../../domain/entities/store_config.dart';
 import '../mappers/firestore_value_parser.dart';
 
 class FirestoreOrderRepository implements OrderRepository {
@@ -211,6 +212,7 @@ class FirestoreOrderRepository implements OrderRepository {
         final normalizedStatus = _normalizedStatusFilter(status);
         final ordersById = <String, Order>{};
 
+        // 1. Direct ID lookup candidates
         for (final candidateId in _candidateOrderIds(searchText)) {
           final doc = await _orders.doc(candidateId).get().timeout(
                 AppDurations.networkTimeout,
@@ -223,6 +225,7 @@ class FirestoreOrderRepository implements OrderRepository {
           }
         }
 
+        // 2. Token-based query candidates
         if (searchToken.length >= 2) {
           Query<Map<String, dynamic>> tokenQuery = _orders
               .where('searchTokens', arrayContains: searchToken);
@@ -242,6 +245,7 @@ class FirestoreOrderRepository implements OrderRepository {
           }
         }
 
+        // 3. Prefix-based query candidates
         final prefix = searchText.toUpperCase();
         if (prefix.length >= 2) {
           Query<Map<String, dynamic>> prefixQuery = _orders
@@ -262,15 +266,44 @@ class FirestoreOrderRepository implements OrderRepository {
           }
         }
 
-        final orders = ordersById.values.toList()
-          ..sort((a, b) {
-            final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-            final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-            return descending ? bDate.compareTo(aDate) : aDate.compareTo(bDate);
-          });
+        // 4. Fetch the last 200 orders to locally scan as candidates for product names / older format search
+        try {
+          final recentSnapshot = await _orders
+              .orderBy('timestamp', descending: descending)
+              .limit(200)
+              .get()
+              .timeout(AppDurations.networkTimeout);
+          for (final doc in recentSnapshot.docs) {
+            final order = _fromDocument(doc);
+            ordersById[order.id] = order;
+          }
+        } catch (e) {
+          developer.log('Failed to fetch recent orders for local search', error: e);
+        }
+
+        // 5. Client-side filter across the four indices
+        final queryLower = searchText.toLowerCase();
+        final filteredOrders = ordersById.values.where((order) {
+          if (!_matchesStatus(order, normalizedStatus)) return false;
+
+          final idMatch = order.id.toLowerCase().contains(queryLower);
+          final nameMatch = order.customerDisplayName.toLowerCase().contains(queryLower);
+          final phoneMatch = order.phone.toLowerCase().contains(queryLower);
+          final productMatch = order.items.any(
+            (item) => item.name.toLowerCase().contains(queryLower),
+          );
+
+          return idMatch || nameMatch || phoneMatch || productMatch;
+        }).toList();
+
+        filteredOrders.sort((a, b) {
+          final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return descending ? bDate.compareTo(aDate) : aDate.compareTo(bDate);
+        });
 
         return OrderPage(
-          orders: orders.take(safeLimit).toList(),
+          orders: filteredOrders.take(safeLimit).toList(),
           hasMore: false,
         );
       },
@@ -302,6 +335,7 @@ class FirestoreOrderRepository implements OrderRepository {
         final normalizedStatus = _normalizedStatusFilter(status);
         final ordersById = <String, Order>{};
 
+        // 1. Direct ID lookup candidates
         for (final candidateId in _candidateOrderIds(searchText)) {
           final doc = await _orders.doc(candidateId).get().timeout(
                 AppDurations.networkTimeout,
@@ -314,6 +348,7 @@ class FirestoreOrderRepository implements OrderRepository {
           }
         }
 
+        // 2. Token-based query candidates
         if (searchToken.length >= 2) {
           Query<Map<String, dynamic>> tokenQuery = _orders
               .where('searchTokens', arrayContains: searchToken)
@@ -337,15 +372,45 @@ class FirestoreOrderRepository implements OrderRepository {
           }
         }
 
-        final orders = ordersById.values.toList()
-          ..sort((a, b) {
-            final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-            final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-            return descending ? bDate.compareTo(aDate) : aDate.compareTo(bDate);
-          });
+        // 3. Fetch all orders for the date to scan locally
+        try {
+          final dateQuerySnapshot = await _orders
+              .where('timestamp', isGreaterThanOrEqualTo: startTimestamp)
+              .where('timestamp', isLessThan: endTimestamp)
+              .get()
+              .timeout(AppDurations.networkTimeout);
+          for (final doc in dateQuerySnapshot.docs) {
+            final order = _fromDocument(doc);
+            ordersById[order.id] = order;
+          }
+        } catch (e) {
+          developer.log('Failed to fetch orders by date for local search', error: e);
+        }
+
+        // 4. Client-side filter across the four indices
+        final queryLower = searchText.toLowerCase();
+        final filteredOrders = ordersById.values.where((order) {
+          if (!_matchesStatus(order, normalizedStatus)) return false;
+          if (!_isOrderInDateRange(order, startDate, endDate)) return false;
+
+          final idMatch = order.id.toLowerCase().contains(queryLower);
+          final nameMatch = order.customerDisplayName.toLowerCase().contains(queryLower);
+          final phoneMatch = order.phone.toLowerCase().contains(queryLower);
+          final productMatch = order.items.any(
+            (item) => item.name.toLowerCase().contains(queryLower),
+          );
+
+          return idMatch || nameMatch || phoneMatch || productMatch;
+        }).toList();
+
+        filteredOrders.sort((a, b) {
+          final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return descending ? bDate.compareTo(aDate) : aDate.compareTo(bDate);
+        });
 
         return OrderPage(
-          orders: orders.take(safeLimit).toList(),
+          orders: filteredOrders.take(safeLimit).toList(),
           hasMore: false,
         );
       },
@@ -430,20 +495,16 @@ class FirestoreOrderRepository implements OrderRepository {
             closeMinute = configData['closeMinute'] as int? ?? 0;
           }
           
-          if (!storeEnabled) {
-            throw RepositoryException(
-              'Store is temporarily unavailable. Please try again later.',
-              code: 'store-disabled',
-            );
-          }
-          
           final now = DateTime.now();
-          final currentMinutes = now.hour * 60 + now.minute;
-          final openMinutes = openHour * 60 + openMinute;
-          final closeMinutes = closeHour * 60 + closeMinute;
-          final isOpen = currentMinutes >= openMinutes && currentMinutes < closeMinutes;
+          final config = StoreConfig(
+            storeEnabled: storeEnabled,
+            openHour: openHour,
+            openMinute: openMinute,
+            closeHour: closeHour,
+            closeMinute: closeMinute,
+          );
           
-          if (!isOpen) {
+          if (!config.isOpenAt(now)) {
             throw RepositoryException(
               'Store is currently closed.',
               code: 'store-closed',
@@ -461,6 +522,52 @@ class FirestoreOrderRepository implements OrderRepository {
               'Unable to reserve a unique order ID. Please try again.',
               code: 'order-id-collision',
             );
+          }
+
+          // Read all product documents first (must be before any sets/updates in transaction)
+          final productSnapshots = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+          for (final item in request.items) {
+            final productRef = _firestore.collection(FirestoreCollections.products).doc(item.productId);
+            final doc = await transaction.get(productRef);
+            productSnapshots[item.productId] = doc;
+          }
+
+          // Validate stock levels
+          for (final item in request.items) {
+            final doc = productSnapshots[item.productId];
+            if (doc != null && doc.exists) {
+              final productData = doc.data()!;
+              final trackStock = productData['trackStock'] as bool? ?? (productData['stockQuantity'] != null);
+              if (trackStock) {
+                final stockQuantity = readInt(productData['stockQuantity']);
+                if (stockQuantity < item.quantity) {
+                  throw RepositoryException(
+                    'Only $stockQuantity items available for this product.',
+                    code: 'out-of-stock',
+                  );
+                }
+              }
+            }
+          }
+
+          // Decrement stock levels atomics
+          for (final item in request.items) {
+            final doc = productSnapshots[item.productId];
+            if (doc != null && doc.exists) {
+              final productData = doc.data()!;
+              final trackStock = productData['trackStock'] as bool? ?? (productData['stockQuantity'] != null);
+              if (trackStock) {
+                final stockQuantity = readInt(productData['stockQuantity']);
+                final nextQuantity = stockQuantity - item.quantity;
+                final productRef = _firestore.collection(FirestoreCollections.products).doc(item.productId);
+                
+                transaction.update(productRef, {
+                  'stockQuantity': FieldValue.increment(-item.quantity),
+                  if (nextQuantity <= 0) 'isAvailable': false,
+                  'updatedAt': FieldValue.serverTimestamp(),
+                });
+              }
+            }
           }
 
           transaction.set(
@@ -534,6 +641,165 @@ class FirestoreOrderRepository implements OrderRepository {
         }, SetOptions(merge: true)).timeout(AppDurations.networkTimeout);
       },
     );
+  }
+
+  @override
+  Future<void> cancelOrder({
+    required String orderId,
+    required String userId,
+  }) async {
+    final normalizedOrderId = orderId.trim();
+    if (normalizedOrderId.isEmpty) {
+      developer.log('FirestoreOrderRepository: cancelOrder aborted - orderId is empty', name: 'OrderCancelTrace');
+      throw ArgumentError.value(orderId, 'orderId', 'Required');
+    }
+
+    developer.log('FirestoreOrderRepository: cancelOrder started for orderId: $normalizedOrderId', name: 'OrderCancelTrace');
+
+    return RepositoryGuard.run(
+      message: 'Unable to cancel order.',
+      action: () async {
+        developer.log('FirestoreOrderRepository: Running transaction for cancelOrder', name: 'OrderCancelTrace');
+        await _firestore.runTransaction((transaction) async {
+          final orderRef = _orders.doc(normalizedOrderId);
+          developer.log('FirestoreOrderRepository: Fetching order doc: $normalizedOrderId', name: 'OrderCancelTrace');
+          final orderDoc = await transaction.get(orderRef);
+          if (!orderDoc.exists) {
+            developer.log('FirestoreOrderRepository: Order doc does not exist', name: 'OrderCancelTrace');
+            throw RepositoryException(
+              'Order not found.',
+              code: 'order-not-found',
+            );
+          }
+
+          final orderData = orderDoc.data();
+          if (orderData == null) {
+            developer.log('FirestoreOrderRepository: Order data is null', name: 'OrderCancelTrace');
+            throw RepositoryException(
+              'Order data is empty.',
+              code: 'order-empty',
+            );
+          }
+
+          final currentStatus = OrderStatus.normalize(orderData['status']?.toString());
+          developer.log('FirestoreOrderRepository: Current status is $currentStatus', name: 'OrderCancelTrace');
+          
+          // Allowed statuses for cancellation: Placed, Confirmed, Packed.
+          final allowedStatuses = [
+            OrderStatus.placed,
+            OrderStatus.confirmed,
+            OrderStatus.packed,
+          ];
+
+          if (!allowedStatuses.contains(currentStatus)) {
+            developer.log('FirestoreOrderRepository: Cancel aborted - status $currentStatus is not allowed', name: 'OrderCancelTrace');
+            throw RepositoryException(
+              'Order cannot be cancelled because it is in status: $currentStatus.',
+              code: 'invalid-status',
+            );
+          }
+
+          // Restore stock
+          final itemsList = orderData['items'];
+          developer.log('FirestoreOrderRepository: Order contains ${itemsList?.length} items', name: 'OrderCancelTrace');
+          if (itemsList is List) {
+            for (final itemVal in itemsList) {
+              if (itemVal is Map) {
+                final item = Map<String, dynamic>.from(itemVal);
+                final productId = readString(item, 'productId');
+                final quantity = readInt(item['quantity']);
+                if (productId.isNotEmpty && quantity > 0) {
+                  final productRef = _firestore.collection(FirestoreCollections.products).doc(productId);
+                  developer.log('FirestoreOrderRepository: Fetching product $productId to restore $quantity stock', name: 'OrderCancelTrace');
+                  final productDoc = await transaction.get(productRef);
+                  if (productDoc.exists) {
+                    final productData = productDoc.data();
+                    if (productData != null) {
+                      final trackStock = productData['trackStock'] as bool? ?? (productData['stockQuantity'] != null);
+                      developer.log('FirestoreOrderRepository: Product $productId trackStock=$trackStock', name: 'OrderCancelTrace');
+                      if (trackStock) {
+                        final currentStock = readInt(productData['stockQuantity']);
+                        final nextQuantity = currentStock + quantity;
+                        developer.log('FirestoreOrderRepository: Restoring product $productId stock from $currentStock to $nextQuantity', name: 'OrderCancelTrace');
+                        transaction.update(productRef, {
+                          'stockQuantity': FieldValue.increment(quantity),
+                          if (nextQuantity > 0) 'isAvailable': true,
+                          'updatedAt': FieldValue.serverTimestamp(),
+                        });
+                      }
+                    }
+                  } else {
+                    developer.log('FirestoreOrderRepository: Product $productId doc not found', name: 'OrderCancelTrace');
+                  }
+                }
+              }
+            }
+          }
+
+          // Update order status to Cancelled
+          developer.log('FirestoreOrderRepository: Updating order status to Cancelled', name: 'OrderCancelTrace');
+          transaction.update(orderRef, {
+            'status': OrderStatus.cancelled,
+            'updatedAt': FieldValue.serverTimestamp(),
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+          
+          // Create customer status notification document
+          developer.log('FirestoreOrderRepository: Creating customer status notification doc', name: 'OrderCancelTrace');
+          final customerNotifRef = _firestore.collection(FirestoreCollections.notifications).doc('customer_status_${normalizedOrderId}_cancelled');
+          final customerNotifData = {
+            'type': 'order_status',
+            'eventType': 'order_status',
+            'targetUserId': userId.trim(),
+            'targetRole': '',
+            'sourceUserId': userId.trim(),
+            'sourceInstanceId': '',
+            'orderId': normalizedOrderId,
+            'status': OrderStatus.cancelled,
+            'title': 'Order Cancelled Successfully',
+            'body': 'Order Cancelled Successfully',
+            'amount': '',
+            'customerName': orderData['customerName']?.toString().trim() ?? '',
+            'phone': orderData['phone']?.toString().trim() ?? '',
+            'date': _formatDateForNotification(DateTime.now()),
+            'createdAt': FieldValue.serverTimestamp(),
+          };
+          transaction.set(customerNotifRef, customerNotifData);
+
+          // Create admin status notification document
+          developer.log('FirestoreOrderRepository: Creating admin status notification doc', name: 'OrderCancelTrace');
+          final adminNotifRef = _firestore.collection(FirestoreCollections.notifications).doc('admin_cancelled_$normalizedOrderId');
+          final adminNotifData = {
+            'type': 'admin_new_order',
+            'eventType': 'admin_new_order',
+            'targetUserId': '',
+            'targetRole': 'admin',
+            'sourceUserId': userId.trim(),
+            'sourceInstanceId': '',
+            'orderId': normalizedOrderId,
+            'status': OrderStatus.cancelled,
+            'title': 'Order Cancelled',
+            'body': 'Customer cancelled Order #$normalizedOrderId',
+            'amount': '',
+            'customerName': orderData['customerName']?.toString().trim() ?? '',
+            'phone': orderData['phone']?.toString().trim() ?? '',
+            'date': _formatDateForNotification(DateTime.now()),
+            'createdAt': FieldValue.serverTimestamp(),
+          };
+          transaction.set(adminNotifRef, adminNotifData);
+        });
+        developer.log('FirestoreOrderRepository: Transaction completed successfully', name: 'OrderCancelTrace');
+      },
+    );
+  }
+
+  static String _formatDateForNotification(DateTime date) {
+    final localDate = date.toLocal();
+    final day = localDate.day.toString().padLeft(2, '0');
+    final month = localDate.month.toString().padLeft(2, '0');
+    final hour = localDate.hour.toString().padLeft(2, '0');
+    final minute = localDate.minute.toString().padLeft(2, '0');
+    return '$day/$month/${localDate.year} $hour:$minute';
   }
 
   Future<Query<Map<String, dynamic>>> _startAfterOrderCursor({
@@ -617,6 +883,7 @@ class FirestoreOrderRepository implements OrderRepository {
         orderId,
         request.userName,
         request.phone,
+        ...request.items.map((item) => item.name),
       ]),
       'status': OrderStatus.placed,
       'paymentMethod': request.paymentMethod,

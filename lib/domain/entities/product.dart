@@ -11,6 +11,7 @@ class Product {
     this.barcode = '',
     this.brand = '',
     this.stockQuantity,
+    this.trackStock = false,
     this.lowStockThreshold = 5,
     this.createdAt,
     this.updatedAt,
@@ -27,6 +28,7 @@ class Product {
   final String barcode;
   final String brand;
   final int? stockQuantity;
+  final bool trackStock;
   final int lowStockThreshold;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -35,15 +37,17 @@ class Product {
 
   bool get outOfStock => !isAvailable;
 
-  bool get isStockTracked => stockQuantity != null;
+  bool get isStockTracked => trackStock;
 
   bool get isLowStock {
+    if (!trackStock) return false;
     final quantity = stockQuantity;
     if (quantity == null) return false;
     return quantity > 0 && quantity <= lowStockThreshold;
   }
 
   bool get isStockEmpty {
+    if (!trackStock) return false;
     final quantity = stockQuantity;
     if (quantity == null) return false;
     return quantity <= 0;
@@ -67,6 +71,7 @@ class Product {
     String? barcode,
     String? brand,
     int? stockQuantity,
+    bool? trackStock,
     bool clearStockQuantity = false,
     int? lowStockThreshold,
     DateTime? createdAt,
@@ -86,6 +91,7 @@ class Product {
       brand: brand ?? this.brand,
       stockQuantity:
           clearStockQuantity ? null : stockQuantity ?? this.stockQuantity,
+      trackStock: trackStock ?? this.trackStock,
       lowStockThreshold: lowStockThreshold ?? this.lowStockThreshold,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

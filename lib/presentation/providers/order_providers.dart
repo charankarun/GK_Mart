@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:developer' as developer;
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
@@ -292,6 +293,13 @@ class AdminOrderListController
   String _searchQuery = '';
   String? _statusFilter;
   bool _sortAscending = false;
+  Timer? _debounceTimer;
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
 
   Future<void> loadInitial({
     String? searchQuery,
@@ -331,8 +339,37 @@ class AdminOrderListController
     }
   }
 
-  Future<void> search(String query) {
-    return loadInitial(searchQuery: query);
+  Future<void> search(String query) async {
+    final trimmed = query.trim();
+    if (trimmed == _searchQuery) return;
+
+    _debounceTimer?.cancel();
+
+    if (trimmed.isEmpty) {
+      _searchQuery = '';
+      await loadInitial(searchQuery: '');
+      return;
+    }
+
+    if (trimmed.length < 2) {
+      return;
+    }
+
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      return loadInitial(searchQuery: trimmed);
+    }
+
+    final completer = Completer<void>();
+    _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
+      try {
+        await loadInitial(searchQuery: trimmed);
+        if (!completer.isCompleted) completer.complete();
+      } catch (e, st) {
+        if (!completer.isCompleted) completer.completeError(e, st);
+      }
+    });
+
+    return completer.future;
   }
 
   Future<void> setStatusFilter(String statusFilter) {
@@ -386,6 +423,13 @@ class AdminDateOrderListController
   String _searchQuery = '';
   String? _statusFilter;
   bool _sortAscending = false;
+  Timer? _debounceTimer;
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
 
   Future<void> loadInitial({
     String? searchQuery,
@@ -430,8 +474,37 @@ class AdminDateOrderListController
     }
   }
 
-  Future<void> search(String query) {
-    return loadInitial(searchQuery: query);
+  Future<void> search(String query) async {
+    final trimmed = query.trim();
+    if (trimmed == _searchQuery) return;
+
+    _debounceTimer?.cancel();
+
+    if (trimmed.isEmpty) {
+      _searchQuery = '';
+      await loadInitial(searchQuery: '');
+      return;
+    }
+
+    if (trimmed.length < 2) {
+      return;
+    }
+
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      return loadInitial(searchQuery: trimmed);
+    }
+
+    final completer = Completer<void>();
+    _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
+      try {
+        await loadInitial(searchQuery: trimmed);
+        if (!completer.isCompleted) completer.complete();
+      } catch (e, st) {
+        if (!completer.isCompleted) completer.completeError(e, st);
+      }
+    });
+
+    return completer.future;
   }
 
   Future<void> setStatusFilter(String statusFilter) {

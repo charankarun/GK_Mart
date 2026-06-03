@@ -39,14 +39,20 @@ class StoreConfig {
     };
   }
 
-  bool get isOpen {
+  bool isOpenAt(DateTime time) {
     if (!storeEnabled) return false;
-    final now = DateTime.now();
-    final currentMinutes = now.hour * 60 + now.minute;
+    final currentMinutes = time.hour * 60 + time.minute;
     final openMinutes = openHour * 60 + openMinute;
     final closeMinutes = closeHour * 60 + closeMinute;
-    return currentMinutes >= openMinutes && currentMinutes < closeMinutes;
+
+    if (openMinutes < closeMinutes) {
+      return currentMinutes >= openMinutes && currentMinutes < closeMinutes;
+    } else {
+      return currentMinutes >= openMinutes || currentMinutes < closeMinutes;
+    }
   }
+
+  bool get isOpen => isOpenAt(DateTime.now());
 
   String get formattedOpenTime => _formatTime(openHour, openMinute);
   String get formattedCloseTime => _formatTime(closeHour, closeMinute);

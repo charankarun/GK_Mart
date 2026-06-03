@@ -6,7 +6,6 @@ import '../../core/theme/app_theme.dart';
 import '../../domain/entities/customer_order.dart';
 import '../providers/auth_providers.dart';
 import '../providers/order_providers.dart';
-import '../widgets/app_cached_network_image.dart';
 import '../widgets/app_state_widgets.dart';
 import 'order_details_screen.dart';
 
@@ -120,10 +119,9 @@ class _OrderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final normalizedStatus = OrderStatus.normalize(order.status);
     final statusColor = _statusColor(normalizedStatus);
-    final totalQuantity = order.items.fold<int>(
-      0,
-      (total, item) => total + item.quantity,
-    );
+    final distinctItemCount = order.items.length;
+    final itemText = distinctItemCount == 1 ? 'Item' : 'Items';
+    final distinctItemSummary = '$distinctItemCount $itemText Ordered';
 
     return Material(
       color: AppColors.card,
@@ -138,107 +136,93 @@ class _OrderCard extends StatelessWidget {
             border: Border.all(color: AppColors.border),
             boxShadow: AppShadows.card,
           ),
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _OrderProductImages(items: order.items),
-                  const SizedBox(width: 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                '${OrdersText.orderPrefix}$displayNumber',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: AppColors.text,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            _StatusPill(
-                              status: normalizedStatus,
-                              color: statusColor,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 7),
-                        Text(
-                          _formatOrderItems(order.items),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.text,
-                            height: 1.25,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        if (order.createdAt != null)
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.calendar_today_rounded,
-                                color: AppColors.mutedText,
-                                size: 14,
-                              ),
-                              const SizedBox(width: 5),
-                              Expanded(
-                                child: Text(
-                                  _formatDate(order.createdAt!),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: AppColors.mutedText,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                      ],
+                    child: Text(
+                      'Order ID: ${order.id}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  _StatusPill(
+                    status: normalizedStatus,
+                    color: statusColor,
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              _StatusSummary(status: normalizedStatus, color: statusColor),
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Divider(height: 1, color: AppColors.border),
-              ),
+              if (order.createdAt != null)
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.calendar_today_rounded,
+                      color: AppColors.mutedText,
+                      size: 15,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Placed on ${_formatDate(order.createdAt!)}',
+                      style: const TextStyle(
+                        color: AppColors.mutedText,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 12),
+              const Divider(height: 1, color: AppColors.border),
+              const SizedBox(height: 12),
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded(
-                    child: _SummaryChip(
-                      label: OrdersText.total,
-                      value: '\u20B9${_formatPrice(order.total)}',
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Total Billing Amount',
+                        style: TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '\u20B9${_formatPrice(order.total)}',
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _SummaryChip(
-                      label: OrdersText.items,
-                      value: '$totalQuantity',
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.softGreen,
+                      borderRadius: BorderRadius.circular(AppRadii.md),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _SummaryChip(
-                      label: OrdersText.payment,
-                      value: order.paymentMethod,
+                    child: Text(
+                      distinctItemSummary,
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
                 ],
@@ -246,155 +230,6 @@ class _OrderCard extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _OrderProductImages extends StatelessWidget {
-  const _OrderProductImages({required this.items});
-
-  final List<OrderItem> items;
-
-  @override
-  Widget build(BuildContext context) {
-    final visibleItems = items.take(3).toList();
-    final overflowCount = items.length - visibleItems.length;
-
-    if (visibleItems.isEmpty) {
-      return const _OrderImageBox(imageUrl: '');
-    }
-
-    return SizedBox(
-      width: 92,
-      height: 84,
-      child: Stack(
-        children: [
-          for (var index = 0; index < visibleItems.length; index += 1)
-            Positioned(
-              left: index * 12,
-              top: index * 7,
-              child: _OrderImageBox(imageUrl: visibleItems[index].imageUrl),
-            ),
-          if (overflowCount > 0)
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                width: 34,
-                height: 34,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppColors.text.withValues(alpha: 0.82),
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  border: Border.all(color: AppColors.card, width: 2),
-                ),
-                child: Text(
-                  '+$overflowCount',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OrderImageBox extends StatelessWidget {
-  const _OrderImageBox({required this.imageUrl});
-
-  final String imageUrl;
-
-  @override
-  Widget build(BuildContext context) {
-    final trimmedUrl = imageUrl.trim();
-
-    return Container(
-      width: 62,
-      height: 62,
-      decoration: BoxDecoration(
-        color: AppColors.softGreen,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.card, width: 2),
-        boxShadow: AppShadows.soft,
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadii.sm),
-        child: AppCachedNetworkImage(
-          imageUrl: trimmedUrl,
-          fit: BoxFit.cover,
-          filterQuality: FilterQuality.medium,
-          memCacheWidth: OrdersConfig.itemImageCacheExtent,
-          memCacheHeight: OrdersConfig.itemImageCacheExtent,
-          maxWidthDiskCache: OrdersConfig.itemImageDiskCacheExtent,
-          maxHeightDiskCache: OrdersConfig.itemImageDiskCacheExtent,
-          placeholder: const _OrderImagePlaceholder(),
-          errorPlaceholder: const _OrderImagePlaceholder(),
-        ),
-      ),
-    );
-  }
-}
-
-class _OrderImagePlaceholder extends StatelessWidget {
-  const _OrderImagePlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return const AppImagePlaceholder(iconSize: 26);
-  }
-}
-
-class _StatusSummary extends StatelessWidget {
-  const _StatusSummary({
-    required this.status,
-    required this.color,
-  });
-
-  final String status;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.local_shipping_rounded, color: color, size: 18),
-          const SizedBox(width: 8),
-          const Text(
-            OrdersText.orderStatus,
-            style: TextStyle(
-              color: AppColors.mutedText,
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              status,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -426,53 +261,6 @@ class _StatusPill extends StatelessWidget {
           height: 1,
           fontWeight: FontWeight.w900,
         ),
-      ),
-    );
-  }
-}
-
-class _SummaryChip extends StatelessWidget {
-  const _SummaryChip({
-    required this.label,
-    required this.value,
-  });
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: AppColors.mutedText,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value.trim().isEmpty ? OrdersText.notAvailable : value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: AppColors.text,
-              fontSize: 13,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -595,26 +383,19 @@ Color _statusColor(String status) {
   switch (OrderStatus.normalize(status)) {
     case OrderStatus.placed:
       return OrdersColors.placed;
+    case OrderStatus.confirmed:
+      return OrdersColors.placed;
     case OrderStatus.packed:
       return OrdersColors.packed;
     case OrderStatus.outForDelivery:
       return OrdersColors.outForDelivery;
     case OrderStatus.delivered:
       return OrdersColors.delivered;
+    case OrderStatus.cancelled:
+      return AppColors.danger;
     default:
       return AppColors.mutedText;
   }
-}
-
-String _formatOrderItems(List<OrderItem> items) {
-  if (items.isEmpty) return OrdersText.noItems;
-
-  final visibleItems = items.take(2).map((item) {
-    return '${item.name} x ${item.quantity}';
-  }).join(', ');
-
-  if (items.length <= 2) return visibleItems;
-  return '$visibleItems + ${items.length - 2} more';
 }
 
 String _formatPrice(double price) {

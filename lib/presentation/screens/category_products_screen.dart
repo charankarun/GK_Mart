@@ -377,16 +377,16 @@ class _ProductGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final aspectRatio = constraints.maxWidth >= 720 ? 0.98 : 0.78;
+        final aspectRatio = constraints.maxWidth >= 720 ? 0.90 : 0.74;
 
         return GridView.builder(
           controller: controller,
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
           itemCount: products.length,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
-            crossAxisSpacing: 14,
-            mainAxisSpacing: 14,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
             childAspectRatio: aspectRatio,
           ),
           itemBuilder: (context, index) {

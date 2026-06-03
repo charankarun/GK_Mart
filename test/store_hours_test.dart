@@ -80,5 +80,61 @@ void main() {
       expect(config2.formattedOpenTime, '12:30 PM');
       expect(config2.formattedCloseTime, '12:15 AM');
     });
+
+    group('Overnight schedule (5:00 AM to 3:00 AM) tests', () {
+      const config = StoreConfig(
+        storeEnabled: true,
+        openHour: 5,
+        openMinute: 0,
+        closeHour: 3,
+        closeMinute: 0,
+      );
+
+      DateTime timeAt(int hour, int minute) {
+        return DateTime(2026, 6, 4, hour, minute);
+      }
+
+      test('1:00 AM is OPEN', () {
+        expect(config.isOpenAt(timeAt(1, 0)), isTrue);
+      });
+
+      test('2:30 AM is OPEN', () {
+        expect(config.isOpenAt(timeAt(2, 30)), isTrue);
+      });
+
+      test('3:01 AM is CLOSED', () {
+        expect(config.isOpenAt(timeAt(3, 1)), isFalse);
+      });
+
+      test('4:30 AM is CLOSED', () {
+        expect(config.isOpenAt(timeAt(4, 30)), isFalse);
+      });
+
+      test('5:00 AM is OPEN', () {
+        expect(config.isOpenAt(timeAt(5, 0)), isTrue);
+      });
+    });
+
+    group('Admin Override (Store Active = OFF) tests', () {
+      const config = StoreConfig(
+        storeEnabled: false,
+        openHour: 5,
+        openMinute: 0,
+        closeHour: 3,
+        closeMinute: 0,
+      );
+
+      DateTime timeAt(int hour, int minute) {
+        return DateTime(2026, 6, 4, hour, minute);
+      }
+
+      test('1:00 AM is CLOSED when store is disabled', () {
+        expect(config.isOpenAt(timeAt(1, 0)), isFalse);
+      });
+
+      test('5:00 AM is CLOSED when store is disabled', () {
+        expect(config.isOpenAt(timeAt(5, 0)), isFalse);
+      });
+    });
   });
 }
