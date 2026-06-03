@@ -692,7 +692,7 @@ class _PromoBanner extends StatelessWidget {
               child: Stack(
                 children: [
                   AspectRatio(
-                    aspectRatio: isCompact ? 1.65 : 1.9,
+                    aspectRatio: isCompact ? 1.45 : 1.75,
                     child: Image.asset(
                       HomeText.bannerAsset,
                       fit: BoxFit.cover,
@@ -718,49 +718,58 @@ class _PromoBanner extends StatelessWidget {
                   ),
                   Positioned.fill(
                     child: Padding(
-                      padding: EdgeInsets.all(isCompact ? 14 : 18),
+                      padding: EdgeInsets.all(isCompact ? 12 : 18),
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
-                            maxWidth: isCompact ? 205 : 235,
+                            maxWidth: isCompact ? 200 : 235,
                           ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 HomeText.bannerTitle,
                                 maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   color: AppColors.text,
-                                  fontSize: 21,
+                                  fontSize: isCompact ? 16 : 21,
                                   height: 1.1,
                                   letterSpacing: 0,
                                   fontWeight: FontWeight.w900,
                                 ),
                               ),
-                              const SizedBox(height: 7),
-                              const Text(
+                              SizedBox(height: isCompact ? 4 : 8),
+                              Text(
                                 HomeText.bannerSubtitle,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   color: AppColors.mutedText,
-                                  fontSize: 12,
-                                  height: 1.25,
+                                  fontSize: isCompact ? 11 : 12,
+                                  height: 1.2,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
-                              const SizedBox(height: 12),
+                              SizedBox(height: isCompact ? 8 : 12),
                               SizedBox(
-                                height: 36,
+                                height: isCompact ? 32 : 36,
                                 child: ElevatedButton.icon(
                                   onPressed: onShopNow,
-                                  icon: const Icon(
+                                  style: ElevatedButton.styleFrom(
+                                    padding: isCompact
+                                        ? const EdgeInsets.symmetric(horizontal: 12, vertical: 0)
+                                        : null,
+                                    textStyle: TextStyle(
+                                      fontSize: isCompact ? 11 : 12,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  icon: Icon(
                                     Icons.shopping_bag_rounded,
-                                    size: 17,
+                                    size: isCompact ? 15 : 17,
                                   ),
                                   label: const Text(HomeText.shopNow),
                                 ),

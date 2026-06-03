@@ -60,15 +60,6 @@ class WishlistScreen extends ConsumerWidget {
                           productId: product.id,
                         );
                       },
-                onAddToCart: !product.isAvailable
-                    ? null
-                    : () {
-                        _addToCart(
-                          context: context,
-                          ref: ref,
-                          product: product,
-                        );
-                      },
               );
             },
           );
@@ -109,36 +100,100 @@ class WishlistScreen extends ConsumerWidget {
       );
     }
   }
-
-  void _addToCart({
-    required BuildContext context,
-    required WidgetRef ref,
-    required Product product,
-  }) {
-    ref.read(cartControllerProvider.notifier).addProduct(product);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text(WishlistText.addedToCart)),
-    );
-  }
 }
 
-class _WishlistProductCard extends StatelessWidget {
+class _WishlistProductCard extends ConsumerWidget {
   const _WishlistProductCard({
     required this.product,
     required this.isRemoving,
     required this.onRemove,
-    required this.onAddToCart,
   });
 
   final Product product;
   final bool isRemoving;
   final VoidCallback? onRemove;
-  final VoidCallback? onAddToCart;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final hasDiscount =
         product.discountPrice > 0 && product.discountPrice < product.price;
+
+    final cartItems = ref.watch(cartItemsProvider);
+    final cartItemIndex = cartItems.indexWhere((item) => item.productId == product.id);
+    final quantity = cartItemIndex == -1 ? 0 : cartItems[cartItemIndex].quantity;
+
+    final Widget cartAction;
+    if (!product.isAvailable) {
+      cartAction = FilledButton.icon(
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.mutedText.withValues(alpha: 0.22),
+          disabledBackgroundColor: AppColors.mutedText.withValues(alpha: 0.22),
+          disabledForegroundColor: AppColors.mutedText,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.md),
+          ),
+        ),
+        onPressed: null,
+        icon: const Icon(
+          Icons.add_shopping_cart_rounded,
+          size: 18,
+        ),
+        label: const Text(WishlistText.outOfStock),
+      );
+    } else if (quantity <= 0) {
+      cartAction = FilledButton.icon(
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.md),
+          ),
+        ),
+        onPressed: () {
+          ref.read(cartControllerProvider.notifier).addProduct(product);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(WishlistText.addedToCart)),
+          );
+        },
+        icon: const Icon(
+          Icons.add_shopping_cart_rounded,
+          size: 18,
+        ),
+        label: const Text(WishlistText.addToCart),
+      );
+    } else {
+      cartAction = Container(
+        height: 42,
+        decoration: BoxDecoration(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _QuantityButton(
+              icon: Icons.remove_rounded,
+              onTap: () {
+                ref.read(cartControllerProvider.notifier).decrement(product.id);
+              },
+            ),
+            Text(
+              quantity.toString(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            _QuantityButton(
+              icon: Icons.add_rounded,
+              onTap: () {
+                ref.read(cartControllerProvider.notifier).increment(product.id);
+              },
+            ),
+          ],
+        ),
+      );
+    }
 
     return Material(
       color: AppColors.card,
@@ -260,33 +315,36 @@ class _WishlistProductCard extends StatelessWidget {
                 Expanded(
                   child: SizedBox(
                     height: 42,
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        disabledBackgroundColor:
-                            AppColors.mutedText.withValues(alpha: 0.22),
-                        disabledForegroundColor: AppColors.mutedText,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppRadii.md),
-                        ),
-                      ),
-                      onPressed: onAddToCart,
-                      icon: const Icon(
-                        Icons.add_shopping_cart_rounded,
-                        size: 18,
-                      ),
-                      label: Text(
-                        onAddToCart == null
-                            ? WishlistText.outOfStock
-                            : WishlistText.addToCart,
-                      ),
-                    ),
+                    child: cartAction,
                   ),
                 ),
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _QuantityButton extends StatelessWidget {
+  const _QuantityButton({
+    required this.icon,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      child: SizedBox(
+        width: 48,
+        height: 42,
+        child: Icon(icon, color: Colors.white, size: 20),
       ),
     );
   }

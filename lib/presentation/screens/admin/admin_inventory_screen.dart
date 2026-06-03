@@ -767,132 +767,160 @@ class _ProductCard extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _ProductImage(
-              imageUrl: product.imageUrl,
-              onTap: () {
-                _showProductImagePreview(
-                  context,
-                  imageUrl: product.imageUrl,
-                );
-              },
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          product.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _ProductImage(
+                imageUrl: product.imageUrl,
+                onTap: () {
+                  _showProductImagePreview(
+                    context,
+                    imageUrl: product.imageUrl,
+                  );
+                },
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      product.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (_hasTopOffer(product))
+                          const _ProductMiniChip(
+                            label: ProductManagementText.topOffer,
+                            color: AppColors.accent,
+                            background: AppColors.softOrange,
                           ),
+                        _ProductMiniChip(
+                          label: badgeStyle.label,
+                          color: badgeStyle.foreground,
+                          background: badgeStyle.background,
+                        ),
+                      ],
+                    ),
+                    if (visibleCategory.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        '${ProductManagementText.categoryPrefix} '
+                        '$visibleCategory',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        alignment: WrapAlignment.end,
+                    ],
+                    if (product.barcode.trim().isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        '${ProductManagementText.barcodePrefix} '
+                        '${product.barcode.trim()}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    _PriceRow(product: product),
+                    const SizedBox(height: 8),
+                    _StockLine(style: stockStyle),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          if (_hasTopOffer(product))
-                            const _ProductMiniChip(
-                              label: ProductManagementText.topOffer,
-                              color: AppColors.accent,
-                              background: AppColors.softOrange,
-                            ),
-                          _ProductMiniChip(
-                            label: badgeStyle.label,
-                            color: badgeStyle.foreground,
-                            background: badgeStyle.background,
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                product.isAvailable ? 'Active' : 'Inactive',
+                                style: const TextStyle(
+                                  color: AppColors.mutedText,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              if (isUpdating)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 10),
+                                  child: SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(strokeWidth: 1.8),
+                                  ),
+                                )
+                              else
+                                Transform.scale(
+                                  scale: 0.78,
+                                  child: Switch(
+                                    value: product.isAvailable,
+                                    onChanged: onAvailabilityChanged,
+                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                constraints: const BoxConstraints(),
+                                padding: const EdgeInsets.all(6),
+                                tooltip: ProductManagementText.manageStock,
+                                onPressed: isUpdating ? null : onManageStock,
+                                icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                              ),
+                              IconButton(
+                                constraints: const BoxConstraints(),
+                                padding: const EdgeInsets.all(6),
+                                tooltip: ProductManagementText.editProduct,
+                                onPressed: isUpdating ? null : onEdit,
+                                icon: const Icon(Icons.edit_outlined, size: 18),
+                              ),
+                              IconButton(
+                                constraints: const BoxConstraints(),
+                                padding: const EdgeInsets.all(6),
+                                tooltip: ProductManagementText.deleteProduct,
+                                onPressed: isUpdating ? null : onDelete,
+                                color: ProductManagementColors.delete,
+                                icon: const Icon(Icons.delete_outline, size: 18),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
-                  if (visibleCategory.isNotEmpty) ...[
-                    const SizedBox(height: 5),
-                    Text(
-                      '${ProductManagementText.categoryPrefix} '
-                      '$visibleCategory',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.mutedText),
                     ),
                   ],
-                  if (product.barcode.trim().isNotEmpty) ...[
-                    const SizedBox(height: 5),
-                    Text(
-                      '${ProductManagementText.barcodePrefix} '
-                      '${product.barcode.trim()}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.mutedText),
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  _PriceRow(product: product),
-                  const SizedBox(height: 8),
-                  _StockLine(style: stockStyle),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          product.isAvailable
-                              ? ProductManagementText.available
-                              : ProductManagementText.outOfStock,
-                          style: const TextStyle(color: AppColors.mutedText),
-                        ),
-                      ),
-                      if (isUpdating)
-                        const SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: Center(
-                            child: SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          ),
-                        )
-                      else
-                        Switch(
-                          value: product.isAvailable,
-                          onChanged: onAvailabilityChanged,
-                        ),
-                      IconButton(
-                        tooltip: ProductManagementText.manageStock,
-                        onPressed: isUpdating ? null : onManageStock,
-                        icon: const Icon(Icons.inventory_outlined),
-                      ),
-                      IconButton(
-                        tooltip: ProductManagementText.editProduct,
-                        onPressed: isUpdating ? null : onEdit,
-                        icon: const Icon(Icons.edit_outlined),
-                      ),
-                      IconButton(
-                        tooltip: ProductManagementText.deleteProduct,
-                        onPressed: isUpdating ? null : onDelete,
-                        color: ProductManagementColors.delete,
-                        icon: const Icon(Icons.delete_outline),
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1001,17 +1029,21 @@ class _ProductMiniChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Text(
         label,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.clip,
         style: TextStyle(
           color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
         ),
       ),
     );
