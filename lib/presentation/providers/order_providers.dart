@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/notifications/notification_service.dart';
+import '../../core/utils/phone_number_normalizer.dart';
 import '../../domain/entities/order.dart';
 import '../../domain/entities/order_analytics.dart';
 import '../../domain/entities/order_page.dart';
@@ -134,15 +137,28 @@ class OrderCreationController extends StateNotifier<AsyncValue<String?>> {
 
   Future<String> _createOrder(CreateOrderRequest request) async {
     state = const AsyncLoading();
+    _orderCreationLog(
+      'Controller createOrder start '
+      'userIdPresent=${request.userId.trim().isNotEmpty} '
+      'items=${request.items.length} '
+      'phoneNormalized='
+      '${PhoneNumberNormalizer.toIndianLocalNumber(request.phone).isNotEmpty}',
+    );
 
     try {
       final orderId = await _ref.read(orderRepositoryProvider).createOrder(
             request,
           );
       state = AsyncData(orderId);
+      _orderCreationLog('Controller createOrder success orderId=$orderId.');
       return orderId;
     } catch (error, stackTrace) {
       state = AsyncError(error, stackTrace);
+      _orderCreationLog(
+        'Controller createOrder failed.',
+        error: error,
+        stackTrace: stackTrace,
+      );
       rethrow;
     }
   }
@@ -166,6 +182,7 @@ class OrderStatusUpdateController extends Notifier<Map<String, String>> {
   Future<void> updateOrderStatus({
     required String orderId,
     required String status,
+    required String targetUserId,
   }) async {
     if (state.containsKey(orderId)) return;
 
@@ -184,6 +201,17 @@ class OrderStatusUpdateController extends Notifier<Map<String, String>> {
           );
       final nextState = Map<String, String>.from(state)..remove(orderId);
       state = nextState;
+
+      // Notify the customer that their order status has changed.
+      if (targetUserId.trim().isNotEmpty) {
+        unawaited(
+          NotificationService.instance.enqueueOrderStatusNotification(
+            targetUserId: targetUserId.trim(),
+            orderId: orderId,
+            status: normalizedStatus,
+          ),
+        );
+      }
     } catch (_) {
       final nextState = Map<String, String>.from(state);
       if (previousStatus == null) {
@@ -262,22 +290,41 @@ class AdminOrderListController
 
   final Ref _ref;
   String _searchQuery = '';
+  String? _statusFilter;
+  bool _sortAscending = false;
 
-  Future<void> loadInitial({String? searchQuery}) async {
+  Future<void> loadInitial({
+    String? searchQuery,
+    String? statusFilter,
+    bool? sortAscending,
+  }) async {
     if (searchQuery != null) _searchQuery = searchQuery.trim();
+    if (statusFilter != null) {
+      _statusFilter = _normalizedStatusFilter(statusFilter);
+    }
+    if (sortAscending != null) _sortAscending = sortAscending;
+
     state = const AsyncLoading();
 
     try {
       final page = _searchQuery.isEmpty
           ? await _ref.read(orderRepositoryProvider).fetchAllOrdersPage(
                 limit: OrderProviderConfig.pageSize,
+                status: _statusFilter,
+                descending: !_sortAscending,
               )
           : await _ref.read(orderRepositoryProvider).searchAdminOrders(
                 query: _searchQuery,
                 limit: OrderProviderConfig.pageSize,
+                status: _statusFilter,
+                descending: !_sortAscending,
               );
       state = AsyncData(
-        OrderListState.fromPage(page).copyWith(searchQuery: _searchQuery),
+        OrderListState.fromPage(page).copyWith(
+          searchQuery: _searchQuery,
+          statusFilter: _statusFilter ?? '',
+          sortAscending: _sortAscending,
+        ),
       );
     } catch (error, stackTrace) {
       state = AsyncError(error, stackTrace);
@@ -286,6 +333,14 @@ class AdminOrderListController
 
   Future<void> search(String query) {
     return loadInitial(searchQuery: query);
+  }
+
+  Future<void> setStatusFilter(String statusFilter) {
+    return loadInitial(statusFilter: statusFilter);
+  }
+
+  Future<void> setSortAscending(bool sortAscending) {
+    return loadInitial(sortAscending: sortAscending);
   }
 
   Future<void> loadNext() async {
@@ -303,6 +358,8 @@ class AdminOrderListController
       final page = await _ref.read(orderRepositoryProvider).fetchAllOrdersPage(
             limit: OrderProviderConfig.pageSize,
             cursor: currentState.nextCursor,
+            status: _statusFilter,
+            descending: !_sortAscending,
           );
       state = AsyncData(currentState.appendPage(page));
     } catch (_) {
@@ -504,6 +561,7 @@ class OrderProviderConfig {
 }
 
 const _dashboardLogName = 'AdminDashboard';
+const _orderCreationLogName = 'OrderCreation';
 const _debugLoggingEnabled = !bool.fromEnvironment('dart.vm.product');
 
 void _dashboardLog(
@@ -515,6 +573,20 @@ void _dashboardLog(
   developer.log(
     message,
     name: _dashboardLogName,
+    error: error,
+    stackTrace: stackTrace,
+  );
+}
+
+void _orderCreationLog(
+  String message, {
+  Object? error,
+  StackTrace? stackTrace,
+}) {
+  if (!_debugLoggingEnabled) return;
+  developer.log(
+    message,
+    name: _orderCreationLogName,
     error: error,
     stackTrace: stackTrace,
   );

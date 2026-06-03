@@ -83,9 +83,12 @@ service cloud.firestore {
     function validOrderStatus(status) {
       return status in [
         'Placed',
+        'Order Confirmed',
         'Packed',
+        'Shipped',
         'Out for Delivery',
         'Delivered',
+        'Cancelled',
       ];
     }
 
@@ -511,7 +514,7 @@ service cloud.firestore {
 
     match /orders/{orderId} {
       allow create: if signedIn() && validOrderCreate(orderId);
-      allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow read: if isAdmin() || (signedIn() && (resource == null || resource.data.userId == request.auth.uid));
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
         && validOrderStatus(request.resource.data.status);
@@ -523,6 +526,23 @@ service cloud.firestore {
       allow create: if validOrderCounterCreate(counterId);
       allow update: if validOrderCounterUpdate(counterId);
       allow delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      // Customers can create notifications (order placed events) for themselves
+      // or admin-targeted events. Admins can create status-update notifications.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll(['type', 'createdAt'])
+        && request.resource.data.get('type', '') is string
+        && request.resource.data.createdAt == request.time;
+      // Customers can read their own notifications; admins can read admin-targeted ones.
+      allow read: if signedIn()
+        && (
+          resource.data.get('targetUserId', '') == request.auth.uid
+          || (isAdmin() && resource.data.get('targetRole', '') == 'admin')
+          || isAdmin()
+        );
+      allow update, delete: if false;
     }
 
     match /products/{productId} {

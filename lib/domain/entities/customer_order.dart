@@ -121,15 +121,21 @@ class CreateOrderRequest {
 
 class OrderStatus {
   static const placed = 'Placed';
+  static const confirmed = 'Order Confirmed';
   static const packed = 'Packed';
+  static const shipped = 'Shipped';
   static const outForDelivery = 'Out for Delivery';
   static const delivered = 'Delivered';
+  static const cancelled = 'Cancelled';
 
   static const values = [
     placed,
+    confirmed,
     packed,
+    shipped,
     outForDelivery,
     delivered,
+    cancelled,
   ];
 
   static String normalize(String? status) {
@@ -138,7 +144,13 @@ class OrderStatus {
     final lowerStatus = trimmed.toLowerCase();
 
     if (lowerStatus == 'pending') return placed;
+    if (lowerStatus == 'confirmed') return confirmed;
+    if (lowerStatus == 'order confirmed') return confirmed;
     if (lowerStatus == 'processing') return packed;
+    if (lowerStatus == 'out for delivery') return outForDelivery;
+    if (lowerStatus == 'out_for_delivery') return outForDelivery;
+    if (lowerStatus == 'out-for-delivery') return outForDelivery;
+    if (lowerStatus == 'canceled') return cancelled;
 
     for (final value in values) {
       if (value.toLowerCase() == lowerStatus) return value;

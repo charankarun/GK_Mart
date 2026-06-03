@@ -10,6 +10,7 @@ import '../../core/firebase/firebase_providers.dart';
 import '../../core/images/image_upload_processor.dart';
 import '../../core/storage/storage_image_uploader.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/phone_number_normalizer.dart';
 import '../../domain/entities/app_user.dart';
 import '../providers/auth_providers.dart';
 import '../providers/repository_providers.dart';
@@ -199,7 +200,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         uid: session.uid,
         existingPhotoUrl: currentUser?.photoUrl ?? '',
       );
-      final phone = _normalizedPhone(_phoneController.text);
+      final phone = PhoneNumberNormalizer.toIndianLocalNumber(
+        _phoneController.text,
+      );
 
       await ref.read(userRepositoryProvider).upsertUser(
             AppUser(
@@ -270,13 +273,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.webp')) return 'image/webp';
     return EditProfileConfig.defaultImageContentType;
-  }
-
-  static String _normalizedPhone(String value) {
-    final digits = value.replaceAll(RegExp(r'\D'), '');
-    if (digits.length == 10) return '+91$digits';
-    if (digits.length == 12 && digits.startsWith('91')) return '+$digits';
-    return value.trim();
   }
 }
 
@@ -478,13 +474,9 @@ class _ProfileFormCard extends StatelessWidget {
     final trimmed = value?.trim() ?? '';
     if (trimmed.isEmpty) return null;
 
-    final digits = trimmed.replaceAll(RegExp(r'\D'), '');
-    final localNumber = digits.length == 12 && digits.startsWith('91')
-        ? digits.substring(2)
-        : digits;
-    final isValid = RegExp(r'^[6-9]\d{9}$').hasMatch(localNumber);
-
-    return isValid ? null : EditProfileText.invalidPhone;
+    return PhoneNumberNormalizer.isIndianMobileNumber(trimmed)
+        ? null
+        : EditProfileText.invalidPhone;
   }
 }
 

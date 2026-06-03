@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/app_error_handler.dart';
 import '../../core/notifications/notification_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/phone_number_normalizer.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/cart_pricing.dart';
 import '../../domain/entities/order.dart';
@@ -57,7 +60,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     if (!hasSeededProfile && profile != null) {
       hasSeededProfile = true;
       nameController.text = profile.name.trim();
-      phoneController.text = profile.phone.trim();
+      phoneController.text = _normalizedPhoneOrOriginal(profile.phone);
       addressController.text = profile.address.trim();
       pincodeController.text = _extractPincode(profile.address);
     }
@@ -123,12 +126,30 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     required CartPricingSummary pricing,
   }) async {
     if (ref.read(orderCreationControllerProvider).isLoading) return;
-    if (formKey.currentState?.validate() != true || cartItems.isEmpty) return;
+    if (formKey.currentState?.validate() != true) {
+      _logCheckoutOrder(
+          'Stopped before order request: checkout validation failed.');
+      return;
+    }
+    if (cartItems.isEmpty) {
+      _logCheckoutOrder('Stopped before order request: cart is empty.');
+      return;
+    }
+
+    final normalizedPhone = PhoneNumberNormalizer.toIndianLocalNumber(
+      phoneController.text,
+    );
+    _logCheckoutOrder(
+      'Creating order request '
+      'userIdPresent=${userId.trim().isNotEmpty} '
+      'items=${cartItems.length} '
+      'phoneNormalized=${normalizedPhone.isNotEmpty}',
+    );
 
     final request = CreateOrderRequest(
       userId: userId,
       userName: nameController.text.trim(),
-      phone: phoneController.text.trim(),
+      phone: normalizedPhone,
       address: addressController.text.trim(),
       pincode: pincodeController.text.trim(),
       items: cartItems.map(_toOrderItem).toList(),
@@ -140,13 +161,20 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     );
 
     try {
+      _logCheckoutOrder('_placeOrder: calling createOrder...');
       final orderId =
           await ref.read(orderCreationControllerProvider.notifier).createOrder(
                 request,
               );
+      _logCheckoutOrder('Order created successfully orderId=$orderId.');
       unawaited(
-        NotificationService.instance.showOrderStatusNotification(
+        NotificationService.instance.notifyOrderPlaced(
+          userId: userId,
           orderId: orderId,
+          customerName: nameController.text.trim(),
+          phone: normalizedPhone,
+          amount: pricing.finalPayable,
+          date: DateTime.now(),
           status: OrderStatus.placed,
         ),
       );
@@ -159,11 +187,35 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         MaterialPageRoute(builder: (_) => const OrderSuccessScreen()),
       );
     } catch (error) {
-      AppErrorHandler.showErrorSnackBar(
-        context,
-        error,
-        fallbackMessage: CheckoutText.placeOrderError,
+      _logCheckoutOrder(
+        '_placeOrder: order creation FAILED.',
+        error: error,
       );
+      if (!mounted) return;
+      // In debug builds show the raw error code so we can diagnose without
+      // reading logcat. In release builds show the friendly fallback only.
+      final String message;
+      if (kDebugMode) {
+        message = AppErrorHandler.messageFor(
+          error,
+          fallback: CheckoutText.placeOrderError,
+        );
+      } else {
+        message = AppErrorHandler.isPermissionDenied(error)
+            ? CheckoutText.placeOrderError
+            : AppErrorHandler.messageFor(
+                error,
+                fallback: CheckoutText.placeOrderError,
+              );
+      }
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(message),
+            duration: const Duration(seconds: 8),
+          ),
+        );
     }
   }
 
@@ -196,6 +248,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   String _extractPincode(String address) {
     final match = RegExp(r'\b[0-9]{6}\b').firstMatch(address);
     return match?.group(0) ?? '';
+  }
+
+  String _normalizedPhoneOrOriginal(String value) {
+    final normalized = PhoneNumberNormalizer.toIndianLocalNumber(value);
+    if (normalized.isNotEmpty) return normalized;
+    return value.trim();
   }
 }
 
@@ -368,7 +426,7 @@ class _CheckoutFields extends StatelessWidget {
   String? _phoneValidator(String? value) {
     final trimmed = value?.trim() ?? '';
     if (trimmed.isEmpty) return CheckoutText.requiredField;
-    if (!RegExp(r'^[0-9]{10}$').hasMatch(trimmed)) {
+    if (!PhoneNumberNormalizer.isIndianLocalNumber(trimmed)) {
       return CheckoutText.invalidPhone;
     }
     return null;
@@ -648,4 +706,15 @@ class CheckoutText {
   static const invalidPhone = 'Enter a valid 10-digit phone number';
   static const invalidPincode = 'Enter a valid 6-digit pincode';
   static const unserviceablePincode = 'Delivery is not available here';
+}
+
+const _checkoutOrderLogName = 'CheckoutOrder';
+const _checkoutDebugLoggingEnabled = !bool.fromEnvironment('dart.vm.product');
+
+void _logCheckoutOrder(
+  String message, {
+  Object? error,
+}) {
+  if (!_checkoutDebugLoggingEnabled) return;
+  developer.log(message, name: _checkoutOrderLogName, error: error);
 }

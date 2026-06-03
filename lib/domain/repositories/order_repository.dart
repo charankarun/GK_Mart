@@ -19,6 +19,8 @@ abstract class OrderRepository {
   Future<OrderPage> fetchAllOrdersPage({
     required int limit,
     OrderPageCursor? cursor,
+    String? status,
+    bool descending = true,
   });
 
   Future<OrderPage> fetchOrdersByDatePage({
@@ -32,6 +34,8 @@ abstract class OrderRepository {
   Future<OrderPage> searchAdminOrders({
     required String query,
     required int limit,
+    String? status,
+    bool descending = true,
   });
 
   Future<OrderPage> searchAdminOrdersByDate({

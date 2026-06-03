@@ -17,7 +17,8 @@ class CustomerNavigationScope extends InheritedWidget {
   static const homeTab = 0;
   static const wishlistTab = 1;
   static const ordersTab = 2;
-  static const accountTab = 3;
+  static const cartTab = 3;
+  static const accountTab = 4;
 
   final int selectedIndex;
   final CustomerTabSelector selectTab;
@@ -50,6 +51,20 @@ class CustomerNavigationScope extends InheritedWidget {
 
     scope.selectTab(
       ordersTab,
+      resetCurrentStack: true,
+      resetTargetStack: true,
+    );
+  }
+
+  static void openCart(BuildContext context) {
+    final scope = maybeOf(context);
+    if (scope == null) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      return;
+    }
+
+    scope.selectTab(
+      cartTab,
       resetCurrentStack: true,
       resetTargetStack: true,
     );

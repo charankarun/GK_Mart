@@ -32,6 +32,7 @@ class FirestoreCollections {
   static const cartItems = 'items';
   static const categories = 'categories';
   static const counters = 'counters';
+  static const notifications = 'notifications';
   static const orders = 'orders';
   static const products = 'products';
   static const users = 'users';

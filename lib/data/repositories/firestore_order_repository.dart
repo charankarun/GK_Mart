@@ -125,6 +125,8 @@ class FirestoreOrderRepository implements OrderRepository {
   Future<OrderPage> fetchAllOrdersPage({
     required int limit,
     OrderPageCursor? cursor,
+    String? status,
+    bool descending = true,
   }) {
     return RepositoryGuard.run(
       message: 'Unable to load orders.',
@@ -134,8 +136,13 @@ class FirestoreOrderRepository implements OrderRepository {
           return const OrderPage(orders: <Order>[], hasMore: false);
         }
 
-        Query<Map<String, dynamic>> query =
-            _orders.orderBy('timestamp', descending: true).limit(safeLimit);
+        Query<Map<String, dynamic>> query = _orders;
+        final normalizedStatus = _normalizedStatusFilter(status);
+        if (normalizedStatus != null) {
+          query = query.where('status', isEqualTo: normalizedStatus);
+        }
+
+        query = query.orderBy('timestamp', descending: descending).limit(safeLimit);
         query = await _startAfterOrderCursor(query: query, cursor: cursor);
 
         final snapshot = await query.get().timeout(AppDurations.networkTimeout);
@@ -188,6 +195,8 @@ class FirestoreOrderRepository implements OrderRepository {
   Future<OrderPage> searchAdminOrders({
     required String query,
     required int limit,
+    String? status,
+    bool descending = true,
   }) {
     return RepositoryGuard.run(
       message: 'Unable to search orders.',
@@ -199,6 +208,7 @@ class FirestoreOrderRepository implements OrderRepository {
           return const OrderPage(orders: <Order>[], hasMore: false);
         }
 
+        final normalizedStatus = _normalizedStatusFilter(status);
         final ordersById = <String, Order>{};
 
         for (final candidateId in _candidateOrderIds(searchText)) {
@@ -207,15 +217,23 @@ class FirestoreOrderRepository implements OrderRepository {
               );
           if (doc.exists) {
             final order = _fromDocument(doc);
-            ordersById[order.id] = order;
+            if (_matchesStatus(order, normalizedStatus)) {
+              ordersById[order.id] = order;
+            }
           }
         }
 
         if (searchToken.length >= 2) {
-          final tokenSnapshot = await _orders
-              .where('searchTokens', arrayContains: searchToken)
-              .orderBy('timestamp', descending: true)
-              .limit(safeLimit)
+          Query<Map<String, dynamic>> tokenQuery = _orders
+              .where('searchTokens', arrayContains: searchToken);
+          if (normalizedStatus != null) {
+            tokenQuery = tokenQuery.where('status', isEqualTo: normalizedStatus);
+          }
+          tokenQuery = tokenQuery
+              .orderBy('timestamp', descending: descending)
+              .limit(safeLimit);
+
+          final tokenSnapshot = await tokenQuery
               .get()
               .timeout(AppDurations.networkTimeout);
           for (final doc in tokenSnapshot.docs) {
@@ -226,11 +244,16 @@ class FirestoreOrderRepository implements OrderRepository {
 
         final prefix = searchText.toUpperCase();
         if (prefix.length >= 2) {
-          final prefixSnapshot = await _orders
+          Query<Map<String, dynamic>> prefixQuery = _orders
               .orderBy('orderId')
               .startAt([prefix])
-              .endAt(['$prefix$_prefixSearchTerminator'])
-              .limit(safeLimit)
+              .endAt(['$prefix$_prefixSearchTerminator']);
+          if (normalizedStatus != null) {
+            prefixQuery = prefixQuery.where('status', isEqualTo: normalizedStatus);
+          }
+          prefixQuery = prefixQuery.limit(safeLimit);
+
+          final prefixSnapshot = await prefixQuery
               .get()
               .timeout(AppDurations.networkTimeout);
           for (final doc in prefixSnapshot.docs) {
@@ -243,7 +266,7 @@ class FirestoreOrderRepository implements OrderRepository {
           ..sort((a, b) {
             final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
             final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-            return bDate.compareTo(aDate);
+            return descending ? bDate.compareTo(aDate) : aDate.compareTo(bDate);
           });
 
         return OrderPage(
@@ -511,12 +534,24 @@ class FirestoreOrderRepository implements OrderRepository {
     required CreateOrderRequest request,
     required String userId,
   }) {
-    final originalAmount = request.originalAmount > 0
+    // Compute originalAmount first, then round every monetary field to 2dp.
+    // This ensures the Firestore security rule check
+    //   totalAmount == originalAmount - cartDiscount + deliveryFee
+    // always holds exactly, avoiding IEEE 754 floating-point mismatches.
+    final rawOriginalAmount = request.originalAmount > 0
         ? request.originalAmount
         : request.items.fold<double>(
             0,
             (total, item) => total + item.lineTotal,
           );
+
+    final originalAmount = _roundMoney(rawOriginalAmount);
+    final cartDiscount = _roundMoney(request.cartDiscount);
+    final deliveryFee = _roundMoney(request.deliveryFee);
+    final totalSavings = _roundMoney(request.totalSavings);
+    // Recompute totalAmount from the rounded components so the Firestore
+    // rule equation is guaranteed to hold without any rounding error.
+    final totalAmount = _roundMoney(originalAmount - cartDiscount + deliveryFee);
 
     return {
       'orderId': orderId,
@@ -528,11 +563,11 @@ class FirestoreOrderRepository implements OrderRepository {
       'pincode': request.pincode.trim(),
       'items': request.items.map(_orderItemToMap).toList(),
       'originalAmount': originalAmount,
-      'cartDiscount': request.cartDiscount,
-      'deliveryFee': request.deliveryFee,
-      'totalAmount': request.totalAmount,
-      'total': request.totalAmount,
-      'totalSavings': request.totalSavings,
+      'cartDiscount': cartDiscount,
+      'deliveryFee': deliveryFee,
+      'totalAmount': totalAmount,
+      'total': totalAmount,
+      'totalSavings': totalSavings,
       'searchTokens': _orderSearchTokens([
         orderId,
         request.userName,
@@ -543,6 +578,13 @@ class FirestoreOrderRepository implements OrderRepository {
       'createdAt': FieldValue.serverTimestamp(),
       'timestamp': FieldValue.serverTimestamp(),
     };
+  }
+
+  /// Rounds a monetary value to 2 decimal places to prevent IEEE 754
+  /// floating-point mismatch when Firestore security rules re-evaluate
+  /// the arithmetic equality check.
+  static double _roundMoney(double value) {
+    return (value * 100).roundToDouble() / 100;
   }
 
   static int _nextOrderNumber(Map<String, dynamic>? data) {

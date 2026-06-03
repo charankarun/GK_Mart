@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -8,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../../domain/entities/order.dart';
 import '../constants/app_constants.dart';
 import 'notification_payload.dart';
 
@@ -57,10 +59,24 @@ class NotificationService {
   StreamSubscription<RemoteMessage>? _foregroundMessageSubscription;
   StreamSubscription<RemoteMessage>? _messageOpenedSubscription;
   StreamSubscription<String>? _tokenRefreshSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+      _customerNotificationSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+      _adminNotificationSubscription;
   NotificationSelectionHandler? _onNotificationSelected;
   bool _isInitialized = false;
   bool _localNotificationsInitialized = false;
   String? _registeredUid;
+  String? _notificationListenerUid;
+  bool _customerInitialSnapshotSeen = false;
+  bool _adminInitialSnapshotSeen = false;
+  final Set<String> _seenNotificationIds = <String>{};
+  final String _instanceId =
+      DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+
+  CollectionReference<Map<String, dynamic>> get _notifications {
+    return _firestore.collection(FirestoreCollections.notifications);
+  }
 
   Future<void> initialize({
     required NotificationSelectionHandler onNotificationSelected,
@@ -93,6 +109,8 @@ class NotificationService {
     await _foregroundMessageSubscription?.cancel();
     await _messageOpenedSubscription?.cancel();
     await _tokenRefreshSubscription?.cancel();
+    await _customerNotificationSubscription?.cancel();
+    await _adminNotificationSubscription?.cancel();
   }
 
   Future<NotificationSettings> requestPermissions() async {
@@ -141,6 +159,7 @@ class NotificationService {
     final normalizedUid = uid.trim();
     if (normalizedUid.isEmpty) return;
 
+    await stopOrderNotificationListeners();
     _registeredUid = null;
     await _tokenRefreshSubscription?.cancel();
     _tokenRefreshSubscription = null;
@@ -188,6 +207,208 @@ class NotificationService {
     );
   }
 
+  Future<void> showOrderPlacedNotification({
+    required String orderId,
+    required double amount,
+    required DateTime date,
+    required String status,
+  }) async {
+    await _initializeLocalNotifications();
+
+    final payload = NotificationPayload.customerOrderPlaced(
+      orderId: orderId,
+      amount: amount,
+      date: date,
+      status: status,
+    );
+    final copy = OrderNotificationCopy.orderPlaced(
+      orderId: orderId,
+      amount: amount,
+    );
+
+    await _showLocalNotification(
+      title: copy.title,
+      body: copy.body,
+      payload: payload,
+    );
+  }
+
+  Future<void> showAdminNewOrderNotification({
+    required String orderId,
+    required String customerName,
+    required double amount,
+    required DateTime date,
+    required String phone,
+  }) async {
+    await _initializeLocalNotifications();
+
+    final payload = NotificationPayload.adminNewOrder(
+      orderId: orderId,
+      customerName: customerName,
+      phone: phone,
+      amount: amount,
+      date: date,
+    );
+    final copy = OrderNotificationCopy.adminNewOrder(
+      orderId: orderId,
+      customerName: customerName,
+      amount: amount,
+    );
+
+    await _showLocalNotification(
+      title: copy.title,
+      body: copy.body,
+      payload: payload,
+    );
+  }
+
+  Future<void> notifyOrderPlaced({
+    required String userId,
+    required String orderId,
+    required String customerName,
+    required String phone,
+    required double amount,
+    required DateTime date,
+    required String status,
+  }) async {
+    await _createNotificationDocument(
+      docId: 'customer_order_placed_$orderId',
+      data: _notificationData(
+        type: NotificationPayload.customerOrderPlacedType,
+        targetUserId: userId,
+        orderId: orderId,
+        status: status,
+        title: OrderNotificationCopy.orderPlaced(
+          orderId: orderId,
+          amount: amount,
+        ).title,
+        body: OrderNotificationCopy.orderPlaced(
+          orderId: orderId,
+          amount: amount,
+        ).body,
+        amount: amount,
+        customerName: customerName,
+        phone: phone,
+        date: date,
+      ),
+    );
+    await _createNotificationDocument(
+      docId: 'admin_new_order_$orderId',
+      data: _notificationData(
+        type: NotificationPayload.adminNewOrderType,
+        targetRole: 'admin',
+        orderId: orderId,
+        title: OrderNotificationCopy.adminNewOrder(
+          orderId: orderId,
+          customerName: customerName,
+          amount: amount,
+        ).title,
+        body: OrderNotificationCopy.adminNewOrder(
+          orderId: orderId,
+          customerName: customerName,
+          amount: amount,
+        ).body,
+        amount: amount,
+        customerName: customerName,
+        phone: phone,
+        date: date,
+      ),
+    );
+    await showOrderPlacedNotification(
+      orderId: orderId,
+      amount: amount,
+      date: date,
+      status: status,
+    );
+  }
+
+  Future<void> enqueueOrderStatusNotification({
+    required String targetUserId,
+    required String orderId,
+    required String status,
+  }) async {
+    final normalizedStatus = OrderStatus.normalize(status);
+    final copy = OrderNotificationCopy.forStatus(
+      status: normalizedStatus,
+      orderId: orderId,
+    );
+    await _createNotificationDocument(
+      docId: 'customer_status_${orderId}_${_notificationKey(normalizedStatus)}',
+      data: _notificationData(
+        type: NotificationPayload.orderStatusType,
+        targetUserId: targetUserId,
+        orderId: orderId,
+        status: normalizedStatus,
+        title: copy.title,
+        body: copy.body,
+        date: DateTime.now(),
+      ),
+    );
+  }
+
+  void startOrderNotificationListeners({
+    required String uid,
+    required bool isAdmin,
+  }) {
+    final normalizedUid = uid.trim();
+    if (normalizedUid.isEmpty) {
+      unawaited(stopOrderNotificationListeners());
+      return;
+    }
+
+    if (_notificationListenerUid != normalizedUid) {
+      _notificationListenerUid = normalizedUid;
+      _seenNotificationIds.clear();
+      _startCustomerNotificationListener(normalizedUid);
+    }
+
+    setAdminNotificationsEnabled(uid: normalizedUid, enabled: isAdmin);
+  }
+
+  void setAdminNotificationsEnabled({
+    required String uid,
+    required bool enabled,
+  }) {
+    final normalizedUid = uid.trim();
+    if (normalizedUid.isEmpty || _notificationListenerUid != normalizedUid) {
+      return;
+    }
+
+    if (!enabled) {
+      unawaited(_adminNotificationSubscription?.cancel());
+      _adminNotificationSubscription = null;
+      _adminInitialSnapshotSeen = false;
+      return;
+    }
+
+    if (_adminNotificationSubscription != null) return;
+    _adminInitialSnapshotSeen = false;
+    _adminNotificationSubscription = _notifications
+        .where('targetRole', isEqualTo: 'admin')
+        .snapshots()
+        .listen(
+      (snapshot) {
+        _handleNotificationSnapshot(
+          snapshot,
+          isInitialSnapshotSeen: _adminInitialSnapshotSeen,
+          markInitialSnapshotSeen: () => _adminInitialSnapshotSeen = true,
+        );
+      },
+      onError: _reportNotificationListenerError,
+    );
+  }
+
+  Future<void> stopOrderNotificationListeners() async {
+    _notificationListenerUid = null;
+    _seenNotificationIds.clear();
+    _customerInitialSnapshotSeen = false;
+    _adminInitialSnapshotSeen = false;
+    await _customerNotificationSubscription?.cancel();
+    await _adminNotificationSubscription?.cancel();
+    _customerNotificationSubscription = null;
+    _adminNotificationSubscription = null;
+  }
+
   static Future<void> showBackgroundNotification(RemoteMessage message) async {
     if (message.notification != null) return;
 
@@ -229,6 +450,69 @@ class NotificationService {
     );
 
     _localNotificationsInitialized = true;
+  }
+
+  void _startCustomerNotificationListener(String uid) {
+    unawaited(_customerNotificationSubscription?.cancel());
+    _customerInitialSnapshotSeen = false;
+    _customerNotificationSubscription = _notifications
+        .where('targetUserId', isEqualTo: uid)
+        .snapshots()
+        .listen(
+      (snapshot) {
+        _handleNotificationSnapshot(
+          snapshot,
+          isInitialSnapshotSeen: _customerInitialSnapshotSeen,
+          markInitialSnapshotSeen: () => _customerInitialSnapshotSeen = true,
+        );
+      },
+      onError: _reportNotificationListenerError,
+    );
+  }
+
+  void _handleNotificationSnapshot(
+    QuerySnapshot<Map<String, dynamic>> snapshot, {
+    required bool isInitialSnapshotSeen,
+    required VoidCallback markInitialSnapshotSeen,
+  }) {
+    if (!isInitialSnapshotSeen) {
+      for (final doc in snapshot.docs) {
+        _seenNotificationIds.add(doc.id);
+      }
+      markInitialSnapshotSeen();
+      return;
+    }
+
+    for (final change in snapshot.docChanges) {
+      if (change.type != DocumentChangeType.added) continue;
+      unawaited(_showNotificationDocument(change.doc));
+    }
+  }
+
+  Future<void> _showNotificationDocument(
+    DocumentSnapshot<Map<String, dynamic>> doc,
+  ) async {
+    if (!_seenNotificationIds.add(doc.id)) return;
+
+    final data = doc.data() ?? const <String, dynamic>{};
+    if (_isLocalCustomerOrderPlacedEcho(data)) return;
+
+    final title = _readNotificationString(data, 'title');
+    final body = _readNotificationString(data, 'body');
+    if (title.isEmpty && body.isEmpty) return;
+
+    await _initializeLocalNotifications();
+    await _showLocalNotification(
+      title: title.isEmpty ? 'Order update' : title,
+      body: body,
+      payload: NotificationPayload.fromMap(data),
+    );
+  }
+
+  bool _isLocalCustomerOrderPlacedEcho(Map<String, dynamic> data) {
+    return _readNotificationString(data, 'type') ==
+            NotificationPayload.customerOrderPlacedType &&
+        _readNotificationString(data, 'sourceInstanceId') == _instanceId;
   }
 
   Future<void> _showForegroundNotification(RemoteMessage message) async {
@@ -355,6 +639,63 @@ class NotificationService {
       );
     }).timeout(AppDurations.networkTimeout);
   }
+Future<void> _createNotificationDocument({
+  required String docId,
+  required Map<String, dynamic> data,
+}) async {
+  try {
+    final docRef = _notifications.doc(docId);
+
+    final existing = await docRef.get();
+
+    if (existing.exists) {
+      return;
+    }
+
+    await docRef
+        .set(data)
+        .timeout(AppDurations.networkTimeout);
+  } on FirebaseException catch (error, stackTrace) {
+    _logNotificationError(
+      'Unable to create notification document.',
+      error,
+      stackTrace,
+    );
+    rethrow;
+  }
+}
+
+  Map<String, dynamic> _notificationData({
+    required String type,
+    required String orderId,
+    required String title,
+    required String body,
+    String targetUserId = '',
+    String targetRole = '',
+    String status = '',
+    String customerName = '',
+    String phone = '',
+    double? amount,
+    required DateTime date,
+  }) {
+    return {
+      'type': type,
+      'eventType': type,
+      'targetUserId': targetUserId.trim(),
+      'targetRole': targetRole.trim(),
+      'sourceUserId': _registeredUid ?? '',
+      'sourceInstanceId': _instanceId,
+      'orderId': orderId.trim(),
+      'status': OrderStatus.normalize(status),
+      'title': title.trim(),
+      'body': body.trim(),
+      'amount': amount == null ? '' : _formatAmount(amount),
+      'customerName': customerName.trim(),
+      'phone': phone.trim(),
+      'date': _formatDate(date),
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+  }
 
   DocumentReference<Map<String, dynamic>> _tokenDocument(
     String uid,
@@ -381,6 +722,63 @@ class NotificationService {
     return hash == 0
         ? DateTime.now().millisecondsSinceEpoch & 0x7fffffff
         : hash;
+  }
+
+  static String _readNotificationString(
+    Map<String, dynamic> data,
+    String key,
+  ) {
+    return data[key]?.toString().trim() ?? '';
+  }
+
+  static String _notificationKey(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+  }
+
+  static String _formatAmount(double amount) {
+    return amount % 1 == 0 ? amount.toStringAsFixed(0) : amount.toStringAsFixed(2);
+  }
+
+  static String _formatDate(DateTime date) {
+    final localDate = date.toLocal();
+    final day = localDate.day.toString().padLeft(2, '0');
+    final month = localDate.month.toString().padLeft(2, '0');
+    final hour = localDate.hour.toString().padLeft(2, '0');
+    final minute = localDate.minute.toString().padLeft(2, '0');
+    return '$day/$month/${localDate.year} $hour:$minute';
+  }
+
+  void _reportNotificationListenerError(Object error, StackTrace stackTrace) {
+    _logNotificationError(
+      'Order notification listener failed.',
+      error,
+      stackTrace,
+    );
+  }
+
+  static void _logNotificationError(
+    String message,
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    developer.log(
+      message,
+      name: 'NotificationService',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'notification_service',
+        context: ErrorDescription(message),
+      ),
+    );
   }
 
   static String get _platformName {

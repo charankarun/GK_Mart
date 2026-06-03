@@ -5,6 +5,7 @@ import '../../core/errors/app_error_handler.dart';
 import '../../core/theme/app_theme.dart';
 import '../../domain/entities/category.dart';
 import '../../domain/entities/product.dart';
+import '../navigation/customer_navigation_scope.dart';
 import '../providers/auth_providers.dart';
 import '../providers/catalog_providers.dart';
 import '../providers/commerce_providers.dart';
@@ -13,7 +14,6 @@ import '../widgets/app_cached_network_image.dart';
 import '../widgets/customer_support_sheet.dart';
 import '../widgets/product_card.dart';
 import 'address_screen.dart';
-import 'cart_screen.dart';
 import 'category_products_screen.dart';
 import 'orders_screen.dart';
 import 'product_detail_screen.dart';
@@ -198,10 +198,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   void _openCart() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const CartScreen()),
-    );
+    CustomerNavigationScope.openCart(context);
   }
 
   void _openAddress() {

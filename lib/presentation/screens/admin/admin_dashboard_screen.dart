@@ -94,6 +94,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
               _DashboardMetricsGrid(
                 stats: stats,
                 inventoryStatsAsync: inventoryStatsAsync,
+                onOpenAllOrders: _openAllOrders,
                 onOpenSelectedDateOrders: _openOrdersForSelectedDate,
               ),
               if (inventoryStatsAsync.hasError) ...[
@@ -151,6 +152,14 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AdminDateOrdersScreen(date: _selectedDate),
+      ),
+    );
+  }
+
+  void _openAllOrders() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const AdminOrdersScreen(),
       ),
     );
   }
@@ -325,11 +334,13 @@ class _DashboardMetricsGrid extends StatelessWidget {
   const _DashboardMetricsGrid({
     required this.stats,
     required this.inventoryStatsAsync,
+    required this.onOpenAllOrders,
     required this.onOpenSelectedDateOrders,
   });
 
   final _OrderDashboardStats stats;
   final AsyncValue<DashboardInventoryStats> inventoryStatsAsync;
+  final VoidCallback onOpenAllOrders;
   final VoidCallback onOpenSelectedDateOrders;
 
   @override
@@ -372,7 +383,7 @@ class _DashboardMetricsGrid extends StatelessWidget {
               value: stats.totalOrders.toString(),
               icon: Icons.receipt_long_rounded,
               color: AppColors.primary,
-              onTap: onOpenSelectedDateOrders,
+              onTap: onOpenAllOrders,
             ),
             _DashboardMetricCard(
               title: AdminDashboardText.revenue,

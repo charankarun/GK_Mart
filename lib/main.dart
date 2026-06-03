@@ -16,10 +16,12 @@ import 'presentation/navigation/customer_navigation_scope.dart';
 import 'presentation/navigation/notification_navigation_service.dart';
 import 'presentation/providers/auth_providers.dart';
 import 'presentation/providers/admin_mode_provider.dart';
+import 'presentation/providers/commerce_providers.dart';
 import 'presentation/providers/wishlist_provider.dart';
 import 'presentation/screens/account_screen.dart';
 import 'presentation/screens/admin_shell_screen.dart';
 import 'presentation/screens/auth_screen.dart';
+import 'presentation/screens/cart_screen.dart';
 import 'presentation/screens/home_screen.dart';
 import 'presentation/screens/orders_screen.dart';
 import 'presentation/screens/splash_screen.dart';
@@ -106,10 +108,27 @@ class AuthWrapper extends ConsumerWidget {
       }
       if (nextUid != null) {
         unawaited(NotificationService.instance.registerDeviceForUser(nextUid));
+        NotificationService.instance.startOrderNotificationListeners(
+          uid: nextUid,
+          isAdmin: false,
+        );
         WidgetsBinding.instance.addPostFrameCallback((_) {
           NotificationNavigationService.instance.processPending();
         });
       }
+    });
+    ref.listen<AsyncValue<bool>>(isAdminProvider, (_, next) {
+      final uid = ref.read(currentSessionProvider)?.uid;
+      if (uid == null || uid.trim().isEmpty) return;
+
+      final isAdmin = next.maybeWhen(
+        data: (value) => value,
+        orElse: () => false,
+      );
+      NotificationService.instance.setAdminNotificationsEnabled(
+        uid: uid,
+        enabled: isAdmin,
+      );
     });
 
     final authState = ref.watch(authStateProvider);
@@ -158,6 +177,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     HomePage(),
     WishlistScreen(),
     OrdersScreen(),
+    CartScreen(),
     AccountPage(),
   ];
 
@@ -233,6 +253,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
 
     final wishlistCount =
         session == null ? 0 : ref.watch(wishlistCountProvider(session.uid));
+    final cartCount = ref.watch(cartItemCountProvider);
 
     return CustomerNavigationScope(
       selectedIndex: _selectedIndex,
@@ -287,7 +308,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                   ),
                   label: 'Wishlist',
                 ),
-                const BottomNavigationBarItem(
+                BottomNavigationBarItem(
                   icon: AppBottomNavIcon(
                     icon: Icons.receipt_long_rounded,
                     selected: false,
@@ -297,6 +318,19 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                     selected: true,
                   ),
                   label: 'Orders',
+                ),
+                BottomNavigationBarItem(
+                  icon: AppBottomNavIcon(
+                    icon: Icons.shopping_cart_outlined,
+                    selected: false,
+                    badgeCount: cartCount,
+                  ),
+                  activeIcon: AppBottomNavIcon(
+                    icon: Icons.shopping_cart_rounded,
+                    selected: true,
+                    badgeCount: cartCount,
+                  ),
+                  label: 'Cart',
                 ),
                 const BottomNavigationBarItem(
                   icon: AppBottomNavIcon(

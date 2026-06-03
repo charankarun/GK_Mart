@@ -74,11 +74,23 @@ class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen> {
 
           return Column(
             children: [
-              _AdminOrderSearchField(
+              _DateOrderControls(
                 controller: _searchController,
                 isSearching: state.searchQuery.isNotEmpty,
-                onChanged: _onSearchChanged,
-                onClear: _clearSearch,
+                statusFilter: state.statusFilter,
+                sortAscending: state.sortAscending,
+                onSearchChanged: _onSearchChanged,
+                onClearSearch: _clearSearch,
+                onStatusChanged: (status) {
+                  ref.read(adminOrderListProvider.notifier).setStatusFilter(
+                        status,
+                      );
+                },
+                onSortChanged: (sortAscending) {
+                  ref.read(adminOrderListProvider.notifier).setSortAscending(
+                        sortAscending,
+                      );
+                },
               ),
               Expanded(
                 child: orders.isEmpty
@@ -117,6 +129,7 @@ class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen> {
                                     .updateOrderStatus(
                                       orderId: order.id,
                                       status: status,
+                                      targetUserId: order.userId,
                                     );
                                 ref
                                     .read(adminOrderListProvider.notifier)
@@ -304,6 +317,7 @@ class _AdminDateOrdersScreenState extends ConsumerState<AdminDateOrdersScreen> {
                                     .updateOrderStatus(
                                       orderId: order.id,
                                       status: status,
+                                      targetUserId: order.userId,
                                     );
                                 await ref
                                     .read(listProvider.notifier)
@@ -405,53 +419,6 @@ class _AdminOrdersEmptyState extends StatelessWidget {
           style: const TextStyle(
             color: AppColors.mutedText,
             fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AdminOrderSearchField extends StatelessWidget {
-  const _AdminOrderSearchField({
-    required this.controller,
-    required this.isSearching,
-    required this.onChanged,
-    required this.onClear,
-  });
-
-  final TextEditingController controller;
-  final bool isSearching;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-      child: TextField(
-        controller: controller,
-        textInputAction: TextInputAction.search,
-        onChanged: onChanged,
-        decoration: InputDecoration(
-          hintText: AdminOrdersText.searchHint,
-          prefixIcon: const Icon(Icons.search_rounded),
-          suffixIcon: isSearching
-              ? IconButton(
-                  tooltip: 'Clear search',
-                  onPressed: onClear,
-                  icon: const Icon(Icons.close_rounded),
-                )
-              : null,
-          filled: true,
-          fillColor: AppColors.card,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-            borderSide: const BorderSide(color: AppColors.border),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-            borderSide: const BorderSide(color: AppColors.border),
           ),
         ),
       ),
@@ -677,6 +644,7 @@ class _AdminOrderCard extends StatelessWidget {
               const SizedBox(height: 12),
               _OrderSummaryLine(
                 customerName: order.customerDisplayName,
+                phone: _fallback(order.phone, 'Phone not available'),
                 total: '\u20B9${_formatPrice(order.total)}',
                 orderDate: orderDate,
               ),
@@ -769,11 +737,13 @@ class _AdminOrderCard extends StatelessWidget {
 class _OrderSummaryLine extends StatelessWidget {
   const _OrderSummaryLine({
     required this.customerName,
+    required this.phone,
     required this.total,
     required this.orderDate,
   });
 
   final String customerName;
+  final String phone;
   final String total;
   final String orderDate;
 
@@ -786,6 +756,10 @@ class _OrderSummaryLine extends StatelessWidget {
         _SummaryPill(
           icon: Icons.person_outline_rounded,
           label: customerName,
+        ),
+        _SummaryPill(
+          icon: Icons.phone_outlined,
+          label: phone,
         ),
         _SummaryPill(
           icon: Icons.payments_outlined,
