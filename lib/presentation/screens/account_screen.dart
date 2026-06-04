@@ -16,7 +16,6 @@ import 'admin/admin_category_screen.dart';
 import 'admin/admin_inventory_screen.dart';
 import 'admin/admin_orders_screen.dart';
 import 'admin/store_settings_screen.dart';
-import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import 'orders_screen.dart';
 
@@ -120,19 +119,7 @@ class AccountPage extends ConsumerWidget {
             subtitle: CustomerSupportText.phone,
             onTap: () => showCustomerSupportSheet(context),
           ),
-          _AccountOption(
-            icon: Icons.lock_reset_rounded,
-            title: AccountText.resetPassword,
-            subtitle: AccountText.resetPasswordSubtitle,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const ChangePasswordScreen(),
-                ),
-              );
-            },
-          ),
+
           if (isAdmin) ...[
             const SizedBox(height: 8),
             _SectionLabel(label: AccountText.adminTools),
@@ -267,9 +254,6 @@ class _ProfileCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final displayName = user?.displayName ?? AccountText.user;
-    final email = user?.email.trim().isNotEmpty == true
-        ? user!.email.trim()
-        : fallbackEmail;
     final phone = user?.phone.trim().isNotEmpty == true
         ? user!.phone.trim()
         : fallbackPhone;
@@ -292,26 +276,15 @@ class _ProfileCard extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  email.isEmpty ? AccountText.noEmail : email,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.mutedText,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
                 if (phone.isNotEmpty) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 5),
                   Text(
                     phone,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: AppColors.mutedText,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -621,7 +594,7 @@ class AccountText {
   static const addressesSaved = 'addresses saved';
   static const adminMode = 'Admin Mode';
   static const editProfile = 'Edit Profile';
-  static const editProfileSubtitle = 'Name, email and profile picture';
+  static const editProfileSubtitle = 'Name, mobile number and profile picture';
   static const myOrders = 'My Orders';
   static const myOrdersSubtitle = 'Track status and order summaries';
   static const myAddress = 'My Address';

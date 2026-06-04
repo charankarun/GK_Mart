@@ -16,6 +16,7 @@ import '../providers/auth_providers.dart';
 import '../providers/repository_providers.dart';
 import '../widgets/app_cached_network_image.dart';
 import '../widgets/app_state_widgets.dart';
+import 'address_screen.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key});
@@ -28,7 +29,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final _imagePicker = ImagePicker();
   final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _pincodeController = TextEditingController();
   final _phoneController = TextEditingController();
 
   bool _didSeedProfile = false;
@@ -41,7 +43,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   @override
   void dispose() {
     _nameController.dispose();
-    _emailController.dispose();
+    _addressController.dispose();
+    _pincodeController.dispose();
     _phoneController.dispose();
     super.dispose();
   }
@@ -66,7 +69,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         data: (user) {
           _seedProfileIfNeeded(
             user: user,
-            fallbackEmail: session.email ?? '',
             fallbackPhone: session.phoneNumber ?? '',
           );
 
@@ -84,8 +86,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 const SizedBox(height: 16),
                 _ProfileFormCard(
                   nameController: _nameController,
-                  emailController: _emailController,
                   phoneController: _phoneController,
+                  addressController: _addressController,
+                  pincodeController: _pincodeController,
                 ),
                 const SizedBox(height: 18),
                 SizedBox(
@@ -127,17 +130,18 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 
   void _seedProfileIfNeeded({
     required AppUser? user,
-    required String fallbackEmail,
     required String fallbackPhone,
   }) {
     if (_didSeedProfile) return;
 
     _didSeedProfile = true;
     _nameController.text = user?.name ?? '';
-    _emailController.text =
-        user?.email.trim().isNotEmpty == true ? user!.email : fallbackEmail;
     _phoneController.text =
         user?.phone.trim().isNotEmpty == true ? user!.phone : fallbackPhone;
+
+    final parsed = ParsedAddress.from(user?.address ?? '');
+    _addressController.text = parsed.address;
+    _pincodeController.text = parsed.pincode;
   }
 
   Future<void> _pickImage() async {
@@ -204,14 +208,30 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         _phoneController.text,
       );
 
+      final existingAddress = currentUser?.address ?? '';
+      final parsed = ParsedAddress.from(existingAddress);
+
+      final nextAddress = [
+        _addressController.text.trim(),
+        if (parsed.landmark.isNotEmpty) '${AddressText.landmarkPrefix} ${parsed.landmark}',
+        if (_pincodeController.text.trim().isNotEmpty) '${AddressText.pincodePrefix} ${_pincodeController.text.trim()}',
+      ].join('\n');
+
+      final nextAddresses = [...(currentUser?.addresses ?? const <String>[])];
+      if (nextAddresses.isNotEmpty) {
+        nextAddresses[0] = nextAddress;
+      } else if (nextAddress.trim().isNotEmpty) {
+        nextAddresses.add(nextAddress);
+      }
+
       await ref.read(userRepositoryProvider).upsertUser(
             AppUser(
               uid: session.uid,
               name: _nameController.text.trim(),
-              email: _emailController.text.trim(),
+              email: currentUser?.email ?? '',
               phone: phone,
-              address: currentUser?.address ?? '',
-              addresses: currentUser?.addresses ?? const <String>[],
+              address: nextAddress,
+              addresses: nextAddresses,
               photoUrl: photoUrl,
               createdAt: currentUser?.createdAt,
             ),
@@ -405,13 +425,15 @@ class _AvatarFallback extends StatelessWidget {
 class _ProfileFormCard extends StatelessWidget {
   const _ProfileFormCard({
     required this.nameController,
-    required this.emailController,
     required this.phoneController,
+    required this.addressController,
+    required this.pincodeController,
   });
 
   final TextEditingController nameController;
-  final TextEditingController emailController;
   final TextEditingController phoneController;
+  final TextEditingController addressController;
+  final TextEditingController pincodeController;
 
   @override
   Widget build(BuildContext context) {
@@ -429,16 +451,6 @@ class _ProfileFormCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           TextFormField(
-            controller: emailController,
-            keyboardType: TextInputType.emailAddress,
-            validator: _emailValidator,
-            decoration: const InputDecoration(
-              labelText: EditProfileText.email,
-              prefixIcon: Icon(Icons.email_outlined),
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextFormField(
             controller: phoneController,
             keyboardType: TextInputType.phone,
             validator: _phoneValidator,
@@ -449,6 +461,29 @@ class _ProfileFormCard extends StatelessWidget {
               labelText: EditProfileText.phone,
               helperText: EditProfileText.phoneHelp,
               prefixIcon: Icon(Icons.phone_outlined),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextFormField(
+            controller: addressController,
+            minLines: 2,
+            maxLines: 4,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Address',
+              prefixIcon: Icon(Icons.home_work_outlined),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextFormField(
+            controller: pincodeController,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            validator: _pincodeValidator,
+            decoration: const InputDecoration(
+              labelText: 'Pincode',
+              prefixIcon: Icon(Icons.pin_drop_outlined),
+              counterText: '',
             ),
           ),
         ],
@@ -462,14 +497,6 @@ class _ProfileFormCard extends StatelessWidget {
     return null;
   }
 
-  String? _emailValidator(String? value) {
-    final trimmed = value?.trim() ?? '';
-    if (trimmed.isEmpty) return null;
-
-    final isValid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(trimmed);
-    return isValid ? null : EditProfileText.invalidEmail;
-  }
-
   String? _phoneValidator(String? value) {
     final trimmed = value?.trim() ?? '';
     if (trimmed.isEmpty) return null;
@@ -477,6 +504,15 @@ class _ProfileFormCard extends StatelessWidget {
     return PhoneNumberNormalizer.isIndianMobileNumber(trimmed)
         ? null
         : EditProfileText.invalidPhone;
+  }
+
+  String? _pincodeValidator(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return null;
+    if (!RegExp(r'^[0-9]{6}$').hasMatch(trimmed)) {
+      return 'Enter a valid 6-digit pincode';
+    }
+    return null;
   }
 }
 

@@ -117,10 +117,15 @@ class AuthWrapper extends ConsumerWidget {
         });
       }
     });
-    ref.listen<AsyncValue<bool>>(isAdminProvider, (_, next) {
+    ref.listen<AsyncValue<bool>>(isAdminProvider, (previous, next) {
       final uid = ref.read(currentSessionProvider)?.uid;
       if (uid == null || uid.trim().isEmpty) return;
 
+      final previousAdmin = previous?.maybeWhen(
+            data: (v) => v,
+            orElse: () => false,
+          ) ??
+          false;
       final isAdmin = next.maybeWhen(
         data: (value) => value,
         orElse: () => false,
@@ -129,6 +134,9 @@ class AuthWrapper extends ConsumerWidget {
         uid: uid,
         enabled: isAdmin,
       );
+      if (isAdmin && !previousAdmin) {
+        ref.read(adminModeProvider.notifier).setEnabled(true);
+      }
     });
 
     final authState = ref.watch(authStateProvider);
