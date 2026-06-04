@@ -577,7 +577,7 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockQuantity', 'isAvailable', 'updatedAt'])
           && request.resource.data.get('stockQuantity', 0) is number
           && resource.data.get('stockQuantity', 0) is number
-          && request.resource.data.get('stockQuantity', 0) > resource.data.get('stockQuantity', 0)
+          && request.resource.data.get('stockQuantity', 0) < resource.data.get('stockQuantity', 0)
           && request.resource.data.get('isAvailable', true) == true
           && request.resource.data.get('updatedAt', request.time) == request.time
         );

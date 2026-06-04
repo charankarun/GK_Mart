@@ -147,6 +147,7 @@ class OrderCreationController extends StateNotifier<AsyncValue<String?>> {
     );
 
     try {
+      _orderCreationLog('Repository called');
       final orderId = await _ref.read(orderRepositoryProvider).createOrder(
             request,
           );

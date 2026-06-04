@@ -1,14 +1,20 @@
+import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants/app_constants.dart';
-import '../../core/errors/app_error_handler.dart';
 import '../../core/theme/app_theme.dart';
 import '../providers/repository_providers.dart';
 
 class AuthScreen extends ConsumerStatefulWidget {
   const AuthScreen({super.key});
+
+  @visibleForTesting
+  static void resetRateLimit() {
+    _AuthScreenState.resetRateLimit();
+  }
 
   @override
   ConsumerState<AuthScreen> createState() => _AuthScreenState();
@@ -22,21 +28,61 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   bool otpSent = false;
   bool isLoading = false;
 
+  Timer? _timer;
+  int _secondsRemaining = 30;
+
+  static final List<DateTime> _otpSendTimestamps = [];
+
+  @visibleForTesting
+  static void resetRateLimit() {
+    _otpSendTimestamps.clear();
+  }
+
   String get _e164Phone => '+91${phoneController.text.trim()}';
 
   @override
   void dispose() {
+    _timer?.cancel();
     phoneController.dispose();
     otpController.dispose();
     super.dispose();
   }
 
-  Future<void> sendOTP() async {
+  void _startTimer() {
+    _timer?.cancel();
+    setState(() {
+      _secondsRemaining = 30;
+    });
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        if (_secondsRemaining > 0) {
+          setState(() {
+            _secondsRemaining--;
+          });
+        } else {
+          _timer?.cancel();
+        }
+      }
+    });
+  }
+
+  bool _isRateLimited() {
+    final now = DateTime.now();
+    _otpSendTimestamps.removeWhere((time) => now.difference(time).inMinutes >= 10);
+    return _otpSendTimestamps.length >= 3;
+  }
+
+  Future<void> sendOTP({bool isResend = false}) async {
     final phone = phoneController.text.trim();
     if (phone.isEmpty || isLoading) return;
 
     if (phone.length != 10 || !RegExp(r'^[0-9]+$').hasMatch(phone)) {
       _showMessage('Enter a valid 10-digit mobile number');
+      return;
+    }
+
+    if (_isRateLimited()) {
+      _showMessage('Too many OTP requests. Please try again after a few minutes.');
       return;
     }
 
@@ -48,21 +94,23 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
             onCodeSent: (verId) {
               if (!mounted) return;
 
+              _otpSendTimestamps.add(DateTime.now());
+
               setState(() {
                 verificationId = verId;
                 otpSent = true;
                 isLoading = false;
               });
-              _showMessage('OTP sent successfully');
+              _startTimer();
+              _showMessage(isResend ? 'OTP Resent Successfully' : 'OTP Sent Successfully');
             },
             onVerificationFailed: (message) {
               if (!mounted) return;
 
               setState(() => isLoading = false);
-              _showMessage(message);
+              _showMessage(_getFriendlyMessageFromString(message));
             },
             onAutoVerified: (_) async {
-              // Automatically verified, stream will update main screen
               if (!mounted) return;
               setState(() => isLoading = false);
             },
@@ -71,11 +119,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       if (!mounted) return;
 
       setState(() => isLoading = false);
-      AppErrorHandler.showErrorSnackBar(
-        context,
-        error,
-        fallbackMessage: 'Unable to send OTP',
-      );
+      _showMessage(_getFriendlyErrorMessage(error));
     }
   }
 
@@ -96,22 +140,81 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
             smsCode: otp,
             fallbackPhone: _e164Phone,
           );
-      // Success: Riverpod auth state listener will automatically redirect to MainScreen
     } catch (error) {
       if (!mounted) return;
-
-      AppErrorHandler.showErrorSnackBar(
-        context,
-        error,
-        fallbackMessage: 'Invalid OTP. Please try again.',
-      );
+      _showMessage(_getFriendlyErrorMessage(error));
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
   }
 
+  void editPhoneNumber() {
+    _timer?.cancel();
+    setState(() {
+      otpSent = false;
+      verificationId = '';
+      otpController.clear();
+      isLoading = false;
+    });
+  }
+
+  String _getFriendlyErrorMessage(Object error) {
+    if (error is FirebaseAuthException) {
+      final code = error.code;
+      final message = (error.message ?? '').toLowerCase();
+
+      if (code == 'too-many-requests' ||
+          message.contains('blocked all requests') ||
+          message.contains('unusual activity') ||
+          message.contains('too many requests')) {
+        return 'Too many verification attempts detected. Please try again later.';
+      }
+
+      switch (code) {
+        case 'invalid-verification-code':
+        case 'invalid-credential':
+          return 'Incorrect OTP entered.';
+        case 'session-expired':
+          return 'OTP expired. Request a new OTP.';
+        case 'network-request-failed':
+          return 'Please check your internet connection.';
+        default:
+          return 'An error occurred. Please try again.';
+      }
+    }
+
+    return _getFriendlyMessageFromString(error.toString());
+  }
+
+  String _getFriendlyMessageFromString(String message) {
+    final lowerMessage = message.toLowerCase();
+    if (lowerMessage.contains('blocked') ||
+        lowerMessage.contains('unusual activity') ||
+        lowerMessage.contains('too-many-requests') ||
+        lowerMessage.contains('too many requests')) {
+      return 'Too many verification attempts detected. Please try again later.';
+    }
+    if (lowerMessage.contains('invalid-verification-code') ||
+        lowerMessage.contains('invalid-credential') ||
+        lowerMessage.contains('invalid code') ||
+        lowerMessage.contains('incorrect')) {
+      return 'Incorrect OTP entered.';
+    }
+    if (lowerMessage.contains('network') ||
+        lowerMessage.contains('connection') ||
+        lowerMessage.contains('network-request-failed')) {
+      return 'Please check your internet connection.';
+    }
+    if (lowerMessage.contains('session-expired') ||
+        lowerMessage.contains('expired')) {
+      return 'OTP expired. Request a new OTP.';
+    }
+    return 'An error occurred. Please try again.';
+  }
+
   void _showMessage(String message) {
     if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
@@ -165,21 +268,38 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      TextField(
-                        controller: phoneController,
-                        keyboardType: TextInputType.phone,
-                        enabled: !otpSent && !isLoading,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(10),
-                        ],
-                        decoration: const InputDecoration(
-                          labelText: 'Mobile Number',
-                          prefixText: '+91 ',
-                          prefixIcon: Icon(Icons.phone_outlined),
-                        ),
-                      ),
                       if (otpSent) ...[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'OTP sent to +91${phoneController.text}',
+                                style: const TextStyle(
+                                  color: AppColors.text,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: isLoading ? null : editPhoneNumber,
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: const Text(
+                                'Change Number',
+                                style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: 16),
                         TextField(
                           controller: otpController,
@@ -192,6 +312,53 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                           decoration: const InputDecoration(
                             labelText: 'Enter 6-Digit OTP',
                             prefixIcon: Icon(Icons.password_rounded),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            if (_secondsRemaining > 0)
+                              Text(
+                                'Resend OTP in $_secondsRemaining seconds',
+                                style: const TextStyle(
+                                  color: AppColors.mutedText,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              )
+                            else
+                              TextButton(
+                                onPressed: isLoading ? null : () => sendOTP(isResend: true),
+                                style: TextButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: const Text(
+                                  'Resend OTP',
+                                  style: TextStyle(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ] else ...[
+                        TextField(
+                          controller: phoneController,
+                          keyboardType: TextInputType.phone,
+                          enabled: !isLoading,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(10),
+                          ],
+                          decoration: const InputDecoration(
+                            labelText: 'Mobile Number',
+                            prefixText: '+91 ',
+                            prefixIcon: Icon(Icons.phone_outlined),
                           ),
                         ),
                       ],
@@ -207,7 +374,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                         ? null
                         : otpSent
                             ? verifyOTP
-                            : sendOTP,
+                            : () => sendOTP(),
                     icon: isLoading
                         ? const SizedBox(
                             width: 22,
@@ -223,25 +390,33 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                                 : Icons.sms_rounded,
                           ),
                     label: Text(
-                      otpSent ? 'Verify & Login' : 'Send Verification OTP',
+                      isLoading
+                          ? (otpSent ? 'Verifying...' : 'Sending OTP...')
+                          : (otpSent ? 'Verify & Login' : 'Send Verification OTP'),
                       style: const TextStyle(fontSize: 16),
                     ),
                   ),
                 ),
                 if (otpSent) ...[
-                  const SizedBox(height: 12),
-                  Center(
-                    child: TextButton.icon(
-                      onPressed: isLoading
-                          ? null
-                          : () {
-                              setState(() {
-                                otpSent = false;
-                                otpController.clear();
-                              });
-                            },
-                      icon: const Icon(Icons.edit_outlined, size: 18),
-                      label: const Text('Change Mobile Number'),
+                  const SizedBox(height: 24),
+                  const Text(
+                    "Didn't receive OTP?",
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    "- Wait for SMS delivery\n"
+                    "- Check entered mobile number\n"
+                    "- Use Resend OTP after countdown",
+                    style: TextStyle(
+                      color: AppColors.mutedText,
+                      fontSize: 13,
+                      height: 1.6,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],

@@ -178,12 +178,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     required List<CartItem> cartItems,
     required CartPricingSummary pricing,
   }) async {
+    _logCheckoutOrder('Place Order clicked');
     if (ref.read(orderCreationControllerProvider).isLoading) return;
     if (formKey.currentState?.validate() != true) {
       _logCheckoutOrder(
           'Stopped before order request: checkout validation failed.');
       return;
     }
+    _logCheckoutOrder('Validation passed');
     if (cartItems.isEmpty) {
       _logCheckoutOrder('Stopped before order request: cart is empty.');
       return;
@@ -241,6 +243,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       totalAmount: pricing.finalPayable,
       totalSavings: pricing.totalSavings,
     );
+    _logCheckoutOrder('CreateOrderRequest created');
 
     try {
       _logCheckoutOrder('_placeOrder: calling createOrder...');
@@ -249,6 +252,13 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                 request,
               );
       _logCheckoutOrder('Order created successfully orderId=$orderId.');
+
+      // Invalidate order list providers to ensure they refresh immediately
+      ref.invalidate(userOrderListProvider(userId));
+      ref.invalidate(adminOrderListProvider);
+      ref.invalidate(dashboardRecentOrdersProvider);
+
+      _logCheckoutOrder('Notification started');
       unawaited(
         NotificationService.instance.notifyOrderPlaced(
           userId: userId,
@@ -258,7 +268,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           amount: pricing.finalPayable,
           date: DateTime.now(),
           status: OrderStatus.placed,
-        ),
+        ).then((_) {
+          _logCheckoutOrder('Notification succeeded');
+        }).catchError((error) {
+          _logCheckoutOrder('Notification failed', error: error);
+        }),
       );
       ref.read(cartControllerProvider.notifier).clear();
       ref.read(orderCreationControllerProvider.notifier).reset();

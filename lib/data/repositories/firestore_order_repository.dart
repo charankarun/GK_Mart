@@ -469,126 +469,139 @@ class FirestoreOrderRepository implements OrderRepository {
           throw ArgumentError.value(request.items, 'items', 'Required');
         }
 
-        return _firestore.runTransaction<String>((transaction) async {
-          // Verify store settings configuration
-          final configRef = _firestore.collection('store_settings').doc('config');
-          final configDoc = await transaction.get(configRef);
-          
-          final configData = configDoc.data();
-          final bool storeEnabled;
-          final int openHour;
-          final int openMinute;
-          final int closeHour;
-          final int closeMinute;
-          
-          if (!configDoc.exists || configData == null) {
-            storeEnabled = true;
-            openHour = 6;
-            openMinute = 0;
-            closeHour = 22;
-            closeMinute = 0;
-          } else {
-            storeEnabled = configData['storeEnabled'] as bool? ?? false;
-            openHour = configData['openHour'] as int? ?? 6;
-            openMinute = configData['openMinute'] as int? ?? 0;
-            closeHour = configData['closeHour'] as int? ?? 22;
-            closeMinute = configData['closeMinute'] as int? ?? 0;
-          }
-          
-          final now = DateTime.now();
-          final config = StoreConfig(
-            storeEnabled: storeEnabled,
-            openHour: openHour,
-            openMinute: openMinute,
-            closeHour: closeHour,
-            closeMinute: closeMinute,
-          );
-          
-          if (!config.isOpenAt(now)) {
-            throw RepositoryException(
-              'Store is currently closed.',
-              code: 'store-closed',
+        developer.log('Firestore write started', name: 'OrderCreation');
+        try {
+          final result = await _firestore.runTransaction<String>((transaction) async {
+            // Verify store settings configuration
+            final configRef = _firestore.collection('store_settings').doc('config');
+            final configDoc = await transaction.get(configRef);
+            
+            final configData = configDoc.data();
+            final bool storeEnabled;
+            final int openHour;
+            final int openMinute;
+            final int closeHour;
+            final int closeMinute;
+            
+            if (!configDoc.exists || configData == null) {
+              storeEnabled = true;
+              openHour = 6;
+              openMinute = 0;
+              closeHour = 22;
+              closeMinute = 0;
+            } else {
+              storeEnabled = configData['storeEnabled'] as bool? ?? false;
+              openHour = configData['openHour'] as int? ?? 6;
+              openMinute = configData['openMinute'] as int? ?? 0;
+              closeHour = configData['closeHour'] as int? ?? 22;
+              closeMinute = configData['closeMinute'] as int? ?? 0;
+            }
+            
+            final now = DateTime.now();
+            final config = StoreConfig(
+              storeEnabled: storeEnabled,
+              openHour: openHour,
+              openMinute: openMinute,
+              closeHour: closeHour,
+              closeMinute: closeMinute,
             );
-          }
+            
+            if (!config.isOpenAt(now)) {
+              throw RepositoryException(
+                'Store is currently closed.',
+                code: 'store-closed',
+              );
+            }
 
-          final counterSnapshot = await transaction.get(_orderCounter);
-          final nextNumber = _nextOrderNumber(counterSnapshot.data());
-          final orderId = _formatOrderId(nextNumber);
-          final orderRef = _orders.doc(orderId);
-          final existingOrderSnapshot = await transaction.get(orderRef);
+            final counterSnapshot = await transaction.get(_orderCounter);
+            final nextNumber = _nextOrderNumber(counterSnapshot.data());
+            final orderId = _formatOrderId(nextNumber);
+            final orderRef = _orders.doc(orderId);
+            final existingOrderSnapshot = await transaction.get(orderRef);
 
-          if (existingOrderSnapshot.exists) {
-            throw RepositoryException(
-              'Unable to reserve a unique order ID. Please try again.',
-              code: 'order-id-collision',
-            );
-          }
+            if (existingOrderSnapshot.exists) {
+              throw RepositoryException(
+                'Unable to reserve a unique order ID. Please try again.',
+                code: 'order-id-collision',
+              );
+            }
 
-          // Read all product documents first (must be before any sets/updates in transaction)
-          final productSnapshots = <String, DocumentSnapshot<Map<String, dynamic>>>{};
-          for (final item in request.items) {
-            final productRef = _firestore.collection(FirestoreCollections.products).doc(item.productId);
-            final doc = await transaction.get(productRef);
-            productSnapshots[item.productId] = doc;
-          }
+            // Read all product documents first (must be before any sets/updates in transaction)
+            final productSnapshots = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+            for (final item in request.items) {
+              final productRef = _firestore.collection(FirestoreCollections.products).doc(item.productId);
+              final doc = await transaction.get(productRef);
+              productSnapshots[item.productId] = doc;
+            }
 
-          // Validate stock levels
-          for (final item in request.items) {
-            final doc = productSnapshots[item.productId];
-            if (doc != null && doc.exists) {
-              final productData = doc.data()!;
-              final trackStock = productData['trackStock'] as bool? ?? (productData['stockQuantity'] != null);
-              if (trackStock) {
-                final stockQuantity = readInt(productData['stockQuantity']);
-                if (stockQuantity < item.quantity) {
-                  throw RepositoryException(
-                    'Only $stockQuantity items available for this product.',
-                    code: 'out-of-stock',
-                  );
+            // Validate stock levels
+            for (final item in request.items) {
+              final doc = productSnapshots[item.productId];
+              if (doc != null && doc.exists) {
+                final productData = doc.data()!;
+                final trackStock = productData['trackStock'] as bool? ?? (productData['stockQuantity'] != null);
+                if (trackStock) {
+                  final stockQuantity = readInt(productData['stockQuantity']);
+                  if (stockQuantity < item.quantity) {
+                    throw RepositoryException(
+                      'Only $stockQuantity items available for this product.',
+                      code: 'out-of-stock',
+                    );
+                  }
                 }
               }
             }
-          }
 
-          // Decrement stock levels atomics
-          for (final item in request.items) {
-            final doc = productSnapshots[item.productId];
-            if (doc != null && doc.exists) {
-              final productData = doc.data()!;
-              final trackStock = productData['trackStock'] as bool? ?? (productData['stockQuantity'] != null);
-              if (trackStock) {
-                final stockQuantity = readInt(productData['stockQuantity']);
-                final nextQuantity = stockQuantity - item.quantity;
-                final productRef = _firestore.collection(FirestoreCollections.products).doc(item.productId);
-                
-                transaction.update(productRef, {
-                  'stockQuantity': FieldValue.increment(-item.quantity),
-                  if (nextQuantity <= 0) 'isAvailable': false,
-                  'updatedAt': FieldValue.serverTimestamp(),
-                });
+            // Decrement stock levels atomics
+            for (final item in request.items) {
+              final doc = productSnapshots[item.productId];
+              if (doc != null && doc.exists) {
+                final productData = doc.data()!;
+                final trackStock = productData['trackStock'] as bool? ?? (productData['stockQuantity'] != null);
+                if (trackStock) {
+                  final stockQuantity = readInt(productData['stockQuantity']);
+                  final nextQuantity = stockQuantity - item.quantity;
+                  final productRef = _firestore.collection(FirestoreCollections.products).doc(item.productId);
+                  
+                  transaction.update(productRef, {
+                    'stockQuantity': FieldValue.increment(-item.quantity),
+                    if (nextQuantity <= 0) 'isAvailable': false,
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  });
+                }
               }
             }
-          }
 
-          transaction.set(
-            orderRef,
-            _orderData(
-              orderId: orderId,
-              request: request,
-              userId: normalizedUserId,
-            ),
-          );
-          transaction.set(
-            _orderCounter,
-            {
-              'next': nextNumber + 1,
-              'updatedAt': FieldValue.serverTimestamp(),
-            },
-            SetOptions(merge: true),
-          );
+            transaction.set(
+              orderRef,
+              _orderData(
+                orderId: orderId,
+                request: request,
+                userId: normalizedUserId,
+              ),
+            );
+            transaction.set(
+              _orderCounter,
+              {
+                'next': nextNumber + 1,
+                'updatedAt': FieldValue.serverTimestamp(),
+              },
+              SetOptions(merge: true),
+            );
 
-          return orderId;
-        }).timeout(AppDurations.networkTimeout);
+            return orderId;
+          }).timeout(AppDurations.networkTimeout);
+          developer.log('Firestore write succeeded', name: 'OrderCreation');
+          return result;
+        } catch (error, stackTrace) {
+          developer.log(
+            'Firestore write failed',
+            name: 'OrderCreation',
+            error: error,
+            stackTrace: stackTrace,
+          );
+          rethrow;
+        }
       },
     );
   }

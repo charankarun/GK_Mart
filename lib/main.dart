@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'core/constants/app_constants.dart';
 import 'core/errors/app_error_handler.dart';
 import 'core/notifications/notification_service.dart';
+import 'core/theme/app_colors.dart';
 import 'core/theme/app_theme.dart';
 import 'domain/entities/auth_session.dart';
 import 'presentation/navigation/customer_navigation_scope.dart';
@@ -39,6 +42,18 @@ Future<void> main() async {
 
 Future<void> _initializeFirebase() async {
   await Firebase.initializeApp().timeout(AppDurations.startupTimeout);
+  try {
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: AndroidProvider.playIntegrity,
+    );
+  } catch (error, stackTrace) {
+    developer.log(
+      'Firebase App Check failed to initialize.',
+      error: error,
+      stackTrace: stackTrace,
+      name: 'AppCheckInit',
+    );
+  }
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,
   );
