@@ -87,8 +87,10 @@ class ProductPageListController
     try {
       final page =
           await _loadPage(limit: CatalogProviderConfig.productPageSize);
+      if (!mounted) return;
       state = AsyncData(ProductListState.fromPage(page));
     } catch (error, stackTrace) {
+      if (!mounted) return;
       state = AsyncError(error, stackTrace);
     }
   }
@@ -108,9 +110,10 @@ class ProductPageListController
         limit: CatalogProviderConfig.productPageSize,
         cursor: currentState.nextCursor,
       );
-
+      if (!mounted) return;
       state = AsyncData(currentState.appendPage(page));
     } catch (_) {
+      if (!mounted) return;
       state = AsyncData(currentState.copyWith(isLoadingMore: false));
       rethrow;
     }

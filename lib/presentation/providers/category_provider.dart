@@ -123,8 +123,10 @@ class AdminCategoryListController
           await _ref.read(categoryRepositoryProvider).fetchCategoriesPage(
                 limit: CategoryProviderConfig.pageSize,
               );
+      if (!mounted) return;
       state = AsyncData(CategoryListState.fromPage(page));
     } catch (error, stackTrace) {
+      if (!mounted) return;
       state = AsyncError(error, stackTrace);
     }
   }
@@ -145,8 +147,10 @@ class AdminCategoryListController
                 limit: CategoryProviderConfig.pageSize,
                 cursor: currentState.nextCursor,
               );
+      if (!mounted) return;
       state = AsyncData(currentState.appendPage(page));
     } catch (_) {
+      if (!mounted) return;
       state = AsyncData(currentState.copyWith(isLoadingMore: false));
       rethrow;
     }

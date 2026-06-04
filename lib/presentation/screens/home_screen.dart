@@ -10,12 +10,14 @@ import '../providers/auth_providers.dart';
 import '../providers/catalog_providers.dart';
 import '../providers/commerce_providers.dart';
 import '../providers/wishlist_provider.dart';
+import '../providers/notification_provider.dart';
 import '../widgets/app_cached_network_image.dart';
 import '../widgets/customer_support_sheet.dart';
 import '../widgets/product_card.dart';
 import 'address_screen.dart';
 import 'category_products_screen.dart';
 import 'orders_screen.dart';
+import 'notifications_screen.dart';
 import 'product_detail_screen.dart';
 import 'search_results_screen.dart';
 import '../providers/store_providers.dart';
@@ -448,7 +450,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 }
-class _HomeTopBar extends StatelessWidget {
+class _HomeTopBar extends ConsumerWidget {
   const _HomeTopBar({
     required this.cartCount,
     required this.onCartTap,
@@ -462,11 +464,12 @@ class _HomeTopBar extends StatelessWidget {
   final VoidCallback onAddressTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final visibleAddress = address.trim();
     final addressName = visibleAddress.isEmpty
         ? 'Add Address'
         : ParsedAddress.from(visibleAddress).address.split('\n').first;
+    final unreadNotificationCount = ref.watch(unreadNotificationCountProvider);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
@@ -507,35 +510,38 @@ class _HomeTopBar extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          const Text(
+                            'Deliver To',
+                            style: TextStyle(
+                              color: AppColors.mutedText,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 1),
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Text(
-                                'Deliver To',
-                                style: TextStyle(
-                                  color: AppColors.mutedText,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
+                              Flexible(
+                                child: Text(
+                                  addressName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: AppColors.text,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w900,
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 2),
                               const Icon(
                                 Icons.keyboard_arrow_down_rounded,
-                                color: AppColors.primary,
+                                color: AppColors.text,
                                 size: 14,
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            addressName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppColors.text,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w900,
-                            ),
                           ),
                         ],
                       ),
@@ -544,6 +550,18 @@ class _HomeTopBar extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+          const SizedBox(width: 8),
+          _BadgeIconButton(
+            tooltip: 'Notifications',
+            icon: Icons.notifications_none_rounded,
+            count: unreadNotificationCount,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+              );
+            },
           ),
           const SizedBox(width: 8),
           _BadgeIconButton(
@@ -708,7 +726,7 @@ class _PromoBanner extends StatelessWidget {
           child: Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFF0F5132), Color(0xFF198754)],
+                colors: [Color(0xFF0C8346), Color(0xFF10B981)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -745,79 +763,83 @@ class _PromoBanner extends StatelessWidget {
                     children: [
                       Expanded(
                         flex: 6,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: AppColors.accent,
-                                borderRadius: BorderRadius.circular(4),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: AppColors.accent,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'FAST DELIVERY',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 8.5,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
                               ),
-                              child: const Text(
-                                'FAST DELIVERY',
+                              const SizedBox(height: 6),
+                              const Text(
+                                'Daily Essentials',
+                                maxLines: 1,
                                 style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: 8.5,
+                                  fontSize: 18,
                                   fontWeight: FontWeight.w900,
-                                  letterSpacing: 0.5,
+                                  height: 1.1,
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              'Daily Essentials',
-                              maxLines: 1,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w900,
-                                height: 1.1,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            const Text(
-                              'Best Prices Guaranteed',
-                              maxLines: 1,
-                              style: TextStyle(
-                                color: AppColors.softGreen,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            InkWell(
-                              onTap: onShopNow,
-                              borderRadius: BorderRadius.circular(6),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(6),
+                              const SizedBox(height: 2),
+                              const Text(
+                                'Best Prices Guaranteed',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  color: AppColors.softGreen,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
                                 ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      'Shop Now',
-                                      style: TextStyle(
-                                        color: Color(0xFF0F5132),
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w900,
+                              ),
+                              const SizedBox(height: 8),
+                              InkWell(
+                                onTap: onShopNow,
+                                borderRadius: BorderRadius.circular(6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Shop Now',
+                                        style: TextStyle(
+                                          color: AppColors.primary,
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w900,
+                                        ),
                                       ),
-                                    ),
-                                    SizedBox(width: 4),
-                                    Icon(
-                                      Icons.arrow_forward_ios_rounded,
-                                      color: Color(0xFF0F5132),
-                                      size: 9,
-                                    ),
-                                  ],
+                                      SizedBox(width: 4),
+                                      Icon(
+                                        Icons.arrow_forward_ios_rounded,
+                                        color: AppColors.primary,
+                                        size: 9,
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                       Expanded(
@@ -825,6 +847,11 @@ class _PromoBanner extends StatelessWidget {
                         child: LayoutBuilder(
                           builder: (context, constraints) {
                             final height = constraints.maxHeight;
+                            final cardWidth = (constraints.maxWidth * 0.38).clamp(38.0, 54.0);
+                            final iconSize = (cardWidth * 0.3).clamp(12.0, 16.0);
+                            final containerSize = (cardWidth * 0.52).clamp(20.0, 28.0);
+                            final fontSize = (cardWidth * 0.16).clamp(7.0, 8.5);
+
                             return Stack(
                               alignment: Alignment.center,
                               clipBehavior: Clip.none,
@@ -833,6 +860,10 @@ class _PromoBanner extends StatelessWidget {
                                   right: 0,
                                   bottom: height * 0.1,
                                   child: _BannerCollageCard(
+                                    width: cardWidth,
+                                    iconSize: iconSize,
+                                    containerSize: containerSize,
+                                    fontSize: fontSize,
                                     icon: Icons.local_drink_rounded,
                                     label: 'Dairy',
                                     color: Colors.blue.shade50,
@@ -843,6 +874,10 @@ class _PromoBanner extends StatelessWidget {
                                   left: 0,
                                   top: height * 0.05,
                                   child: _BannerCollageCard(
+                                    width: cardWidth,
+                                    iconSize: iconSize,
+                                    containerSize: containerSize,
+                                    fontSize: fontSize,
                                     icon: Icons.rice_bowl_rounded,
                                     label: 'Staples',
                                     color: Colors.amber.shade50,
@@ -855,6 +890,10 @@ class _PromoBanner extends StatelessWidget {
                                   child: Transform.rotate(
                                     angle: 0.1,
                                     child: _BannerCollageCard(
+                                      width: cardWidth,
+                                      iconSize: iconSize,
+                                      containerSize: containerSize,
+                                      fontSize: fontSize,
                                       icon: Icons.apple_rounded,
                                       label: 'Produce',
                                       color: Colors.red.shade50,
@@ -887,6 +926,10 @@ class _BannerCollageCard extends StatelessWidget {
     required this.color,
     required this.iconColor,
     this.elevated = false,
+    this.width = 54,
+    this.iconSize = 16,
+    this.containerSize = 28,
+    this.fontSize = 8.5,
   });
 
   final IconData icon;
@@ -894,12 +937,16 @@ class _BannerCollageCard extends StatelessWidget {
   final Color color;
   final Color iconColor;
   final bool elevated;
+  final double width;
+  final double iconSize;
+  final double containerSize;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 54,
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      width: width,
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
@@ -915,22 +962,25 @@ class _BannerCollageCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 28,
-            height: 28,
+            width: containerSize,
+            height: containerSize,
             decoration: BoxDecoration(
               color: color,
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: iconColor, size: 16),
+            child: Icon(icon, color: iconColor, size: iconSize),
           ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            maxLines: 1,
-            style: const TextStyle(
-              fontSize: 8.5,
-              color: AppColors.text,
-              fontWeight: FontWeight.w800,
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: fontSize,
+                color: AppColors.text,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],
@@ -952,10 +1002,13 @@ class _CategorySection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final sectionHeight = (120.0 + (textScale - 1.0) * 24).clamp(120.0, 160.0);
+
     return _Section(
       title: HomeText.categoriesTitle,
       child: SizedBox(
-        height: 116,
+        height: sectionHeight,
         child: categoriesAsync.when(
           data: (categories) {
             if (categories.isEmpty) {
@@ -1269,7 +1322,7 @@ class _TopOffersHorizontalSection extends StatelessWidget {
                 ),
               ),
               SizedBox(
-                height: 220,
+                height: 240,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -1335,7 +1388,7 @@ class _TopOffersHorizontalSection extends StatelessWidget {
               ),
             ),
             SizedBox(
-              height: 220,
+              height: 240,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -1446,9 +1499,13 @@ class _ProductGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final aspectRatio = constraints.maxWidth >= 720 ? 0.90 : 0.74;
+        final aspectRatio = constraints.maxWidth >= 720
+            ? 0.90
+            : (0.69 - (textScale - 1.0) * 0.18).clamp(0.52, 0.74);
 
         return GridView.builder(
           shrinkWrap: true,

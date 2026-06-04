@@ -497,25 +497,42 @@ class _DashboardMetricCard extends StatelessWidget {
         borderRadius: borderRadius,
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
             borderRadius: borderRadius,
             border: Border.all(color: AppColors.border),
-            boxShadow: AppShadows.soft,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.11),
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                ),
-                child: Icon(icon, color: color),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(icon, color: color, size: 20),
+                  ),
+                  if (onTap != null)
+                    Icon(
+                      Icons.arrow_forward_rounded,
+                      color: AppColors.mutedText.withValues(alpha: 0.5),
+                      size: 16,
+                    ),
+                ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -529,13 +546,13 @@ class _DashboardMetricCard extends StatelessWidget {
                           value,
                           style: const TextStyle(
                             color: AppColors.text,
-                            fontSize: 28,
+                            fontSize: 24,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Flexible(
                       child: Text(
                         title,
@@ -543,7 +560,8 @@ class _DashboardMetricCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: AppColors.mutedText,
-                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),

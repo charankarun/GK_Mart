@@ -59,7 +59,7 @@ class ProductDetailScreen extends ConsumerWidget {
             ),
           ),
           Expanded(
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -105,7 +105,7 @@ class ProductDetailScreen extends ConsumerWidget {
                     'Fresh and high quality product. Delivered fast to your home.',
                     style: TextStyle(fontSize: 14),
                   ),
-                  const Spacer(),
+                  const SizedBox(height: 24),
                   if (quantity > 0)
                     Row(
                       children: [

@@ -243,8 +243,10 @@ class UserOrderListController
             userId: _userId,
             limit: OrderProviderConfig.pageSize,
           );
+      if (!mounted) return;
       state = AsyncData(OrderListState.fromPage(page));
     } catch (error, stackTrace) {
+      if (!mounted) return;
       state = AsyncError(error, stackTrace);
     }
   }
@@ -271,8 +273,10 @@ class UserOrderListController
 
     try {
       final page = await loadPage(currentState.nextCursor);
+      if (!mounted) return;
       state = AsyncData(currentState.appendPage(page));
     } catch (_) {
+      if (!mounted) return;
       state = AsyncData(currentState.copyWith(isLoadingMore: false));
       rethrow;
     }
@@ -328,6 +332,7 @@ class AdminOrderListController
                 status: _statusFilter,
                 descending: !_sortAscending,
               );
+      if (!mounted) return;
       state = AsyncData(
         OrderListState.fromPage(page).copyWith(
           searchQuery: _searchQuery,
@@ -336,6 +341,7 @@ class AdminOrderListController
         ),
       );
     } catch (error, stackTrace) {
+      if (!mounted) return;
       state = AsyncError(error, stackTrace);
     }
   }
@@ -399,8 +405,10 @@ class AdminOrderListController
             status: _statusFilter,
             descending: !_sortAscending,
           );
+      if (!mounted) return;
       state = AsyncData(currentState.appendPage(page));
     } catch (_) {
+      if (!mounted) return;
       state = AsyncData(currentState.copyWith(isLoadingMore: false));
       rethrow;
     }
@@ -462,6 +470,7 @@ class AdminDateOrderListController
               descending: !_sortAscending,
             );
 
+      if (!mounted) return;
       state = AsyncData(
         OrderListState.fromPage(page).copyWith(
           searchQuery: _searchQuery,
@@ -471,6 +480,7 @@ class AdminDateOrderListController
         ),
       );
     } catch (error, stackTrace) {
+      if (!mounted) return;
       state = AsyncError(error, stackTrace);
     }
   }
@@ -536,8 +546,10 @@ class AdminDateOrderListController
                 status: _statusFilter,
                 descending: !_sortAscending,
               );
+      if (!mounted) return;
       state = AsyncData(currentState.appendPage(page));
     } catch (_) {
+      if (!mounted) return;
       state = AsyncData(currentState.copyWith(isLoadingMore: false));
       rethrow;
     }

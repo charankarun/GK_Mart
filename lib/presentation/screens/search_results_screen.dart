@@ -356,39 +356,52 @@ class _SearchField extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(right: 12),
       child: SizedBox(
-        height: 44,
-        child: TextField(
-          controller: controller,
-          focusNode: focusNode,
-          textInputAction: TextInputAction.search,
-          autocorrect: false,
-          enableSuggestions: true,
-          onSubmitted: onSubmitted,
-          decoration: InputDecoration(
-            hintText: SearchResultsText.searchHint,
-            filled: true,
-            fillColor: AppColors.background,
-            prefixIcon: const Icon(Icons.search_rounded),
-            suffixIcon: controller.text.trim().isEmpty
-                ? null
-                : IconButton(
-                    tooltip: SearchResultsText.clearSearch,
-                    icon: const Icon(Icons.close_rounded),
-                    onPressed: onClear,
-                  ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppRadii.lg),
-              borderSide: BorderSide.none,
+        height: 46,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            textInputAction: TextInputAction.search,
+            autocorrect: false,
+            enableSuggestions: true,
+            onSubmitted: onSubmitted,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            decoration: InputDecoration(
+              hintText: SearchResultsText.searchHint,
+              filled: true,
+              fillColor: Colors.white,
+              prefixIcon: const Icon(Icons.search_rounded, color: AppColors.mutedText, size: 20),
+              suffixIcon: controller.text.trim().isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: SearchResultsText.clearSearch,
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      onPressed: onClear,
+                    ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppRadii.lg),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppRadii.lg),
-              borderSide: const BorderSide(color: AppColors.primary),
-            ),
-            contentPadding: const EdgeInsets.symmetric(vertical: 12),
           ),
         ),
       ),

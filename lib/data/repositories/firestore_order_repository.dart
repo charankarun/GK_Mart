@@ -795,6 +795,7 @@ class FirestoreOrderRepository implements OrderRepository {
             'phone': orderData['phone']?.toString().trim() ?? '',
             'date': _formatDateForNotification(DateTime.now()),
             'createdAt': FieldValue.serverTimestamp(),
+            'isRead': false,
           };
           transaction.set(customerNotifRef, customerNotifData);
 
@@ -817,6 +818,7 @@ class FirestoreOrderRepository implements OrderRepository {
             'phone': orderData['phone']?.toString().trim() ?? '',
             'date': _formatDateForNotification(DateTime.now()),
             'createdAt': FieldValue.serverTimestamp(),
+            'isRead': false,
           };
           transaction.set(adminNotifRef, adminNotifData);
         });

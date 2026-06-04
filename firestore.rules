@@ -565,7 +565,14 @@ service cloud.firestore {
           || (isAdmin() && resource.data.get('targetRole', '') == 'admin')
           || isAdmin()
         );
-      allow update, delete: if false;
+      allow update: if signedIn()
+        && (
+          resource.data.get('targetUserId', '') == request.auth.uid
+          || (isAdmin() && resource.data.get('targetRole', '') == 'admin')
+          || isAdmin()
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']);
+      allow delete: if false;
     }
 
     match /products/{productId} {

@@ -519,12 +519,18 @@ class _DateOrderControls extends StatelessWidget {
                       ButtonSegment(
                         value: false,
                         icon: Icon(Icons.south_rounded),
-                        label: Text('Newest'),
+                        label: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('Newest'),
+                        ),
                       ),
                       ButtonSegment(
                         value: true,
                         icon: Icon(Icons.north_rounded),
-                        label: Text('Oldest'),
+                        label: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('Oldest'),
+                        ),
                       ),
                     ],
                     selected: {sortAscending},

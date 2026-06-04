@@ -3,21 +3,21 @@ import 'package:flutter/material.dart';
 class AppColors {
   const AppColors._();
 
-  static const primary = Color(0xFF2E7D32);
-  static const primaryDark = Color(0xFF17652A);
-  static const accent = Color(0xFFFF6F00);
-  static const background = Color(0xFFF6F8F3);
-  static const cream = Color(0xFFFFFCF4);
+  static const primary = Color(0xFF0C8346);
+  static const primaryDark = Color(0xFF064E26);
+  static const accent = Color(0xFFFF6B00);
+  static const background = Color(0xFFF8F9FA);
+  static const cream = Color(0xFFFFFDF9);
   static const card = Colors.white;
   static const text = Color(0xFF111827);
-  static const mutedText = Color(0xFF5F6B62);
-  static const border = Color(0xFFE1E8DE);
-  static const softGreen = Color(0xFFEAF4E8);
-  static const softOrange = Color(0xFFFFF1E4);
-  static const success = Color(0xFF15803D);
-  static const warning = Color(0xFFB45309);
-  static const danger = Color(0xFFDC2626);
-  static const info = Color(0xFF2563EB);
+  static const mutedText = Color(0xFF6B7280);
+  static const border = Color(0xFFE5E7EB);
+  static const softGreen = Color(0xFFE8F5E9);
+  static const softOrange = Color(0xFFFFF3E0);
+  static const success = Color(0xFF0C8346);
+  static const warning = Color(0xFFF59E0B);
+  static const danger = Color(0xFFEF4444);
+  static const info = Color(0xFF3B82F6);
 }
 
 class AppRadii {

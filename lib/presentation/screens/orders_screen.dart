@@ -121,7 +121,8 @@ class _OrderCard extends StatelessWidget {
     final statusColor = _statusColor(normalizedStatus);
     final distinctItemCount = order.items.length;
     final itemText = distinctItemCount == 1 ? 'Item' : 'Items';
-    final distinctItemSummary = '$distinctItemCount $itemText Ordered';
+    final distinctItemSummary = '$distinctItemCount $itemText';
+    final itemNames = order.items.map((item) => '${item.name} x${item.quantity}').join(', ');
 
     return Material(
       color: AppColors.card,
@@ -134,7 +135,13 @@ class _OrderCard extends StatelessWidget {
             color: AppColors.card,
             borderRadius: BorderRadius.circular(AppRadii.lg),
             border: Border.all(color: AppColors.border),
-            boxShadow: AppShadows.card,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -145,12 +152,12 @@ class _OrderCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Order ID: ${order.id}',
+                      'Order #${order.id.toUpperCase()}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: AppColors.text,
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -162,66 +169,87 @@ class _OrderCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              if (order.createdAt != null)
+              if (order.createdAt != null) ...[
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     const Icon(
                       Icons.calendar_today_rounded,
                       color: AppColors.mutedText,
-                      size: 15,
+                      size: 13,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     Text(
                       'Placed on ${_formatDate(order.createdAt!)}',
                       style: const TextStyle(
                         color: AppColors.mutedText,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ],
                 ),
+              ],
+              if (itemNames.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  itemNames,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.mutedText,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               const Divider(height: 1, color: AppColors.border),
               const SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Total Billing Amount',
-                        style: TextStyle(
-                          color: AppColors.mutedText,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Total Billing Amount',
+                          style: TextStyle(
+                            color: AppColors.mutedText,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '\u20B9${_formatPrice(order.total)}',
-                        style: const TextStyle(
-                          color: AppColors.primary,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
+                        const SizedBox(height: 2),
+                        Text(
+                          '\u20B9${_formatPrice(order.total)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: AppColors.softGreen,
-                      borderRadius: BorderRadius.circular(AppRadii.md),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       distinctItemSummary,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: AppColors.primary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
@@ -247,22 +275,49 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.24)),
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.2), width: 1.2),
       ),
-      child: Text(
-        status,
-        style: TextStyle(
-          color: color,
-          fontSize: 11,
-          height: 1,
-          fontWeight: FontWeight.w900,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_statusIcon(status), color: color, size: 12),
+          const SizedBox(width: 4),
+          Text(
+            status.toUpperCase(),
+            style: TextStyle(
+              color: color,
+              fontSize: 9,
+              height: 1,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  IconData _statusIcon(String status) {
+    switch (status) {
+      case OrderStatus.placed:
+      case OrderStatus.confirmed:
+        return Icons.check_circle_rounded;
+      case OrderStatus.packed:
+        return Icons.inventory_2_rounded;
+      case OrderStatus.outForDelivery:
+      case OrderStatus.shipped:
+        return Icons.local_shipping_rounded;
+      case OrderStatus.delivered:
+        return Icons.task_alt_rounded;
+      case OrderStatus.cancelled:
+        return Icons.cancel_rounded;
+      default:
+        return Icons.receipt_long_rounded;
+    }
   }
 }
 

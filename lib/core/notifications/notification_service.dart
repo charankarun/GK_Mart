@@ -694,6 +694,7 @@ Future<void> _createNotificationDocument({
       'phone': phone.trim(),
       'date': _formatDate(date),
       'createdAt': FieldValue.serverTimestamp(),
+      'isRead': false,
     };
   }
 

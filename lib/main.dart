@@ -12,7 +12,6 @@ import 'package:flutter/services.dart';
 import 'core/constants/app_constants.dart';
 import 'core/errors/app_error_handler.dart';
 import 'core/notifications/notification_service.dart';
-import 'core/theme/app_colors.dart';
 import 'core/theme/app_theme.dart';
 import 'domain/entities/auth_session.dart';
 import 'presentation/navigation/customer_navigation_scope.dart';

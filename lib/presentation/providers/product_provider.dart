@@ -92,12 +92,14 @@ class AdminProductListController
               query: _searchQuery,
               limit: ProductProviderConfig.pageSize,
             );
+      if (!mounted) return;
       state = AsyncData(
         AdminProductListState.fromPage(page).copyWith(
           searchQuery: _searchQuery,
         ),
       );
     } catch (error, stackTrace) {
+      if (!mounted) return;
       state = AsyncError(error, stackTrace);
     }
   }
@@ -129,6 +131,7 @@ class AdminProductListController
               cursor: currentState.nextCursor,
             );
 
+      if (!mounted) return;
       state = AsyncData(
         currentState.copyWith(
           products: _mergeProducts(currentState.products, page.products),
@@ -138,6 +141,7 @@ class AdminProductListController
         ),
       );
     } catch (_) {
+      if (!mounted) return;
       state = AsyncData(currentState.copyWith(isLoadingMore: false));
       rethrow;
     }
@@ -178,6 +182,7 @@ class AdminProductListController
 
       await loadInitial();
     } catch (error, stackTrace) {
+      if (!mounted) return;
       state = previousState.hasValue
           ? previousState
           : AsyncError(error, stackTrace);
@@ -215,6 +220,7 @@ class AdminProductListController
           );
       final latestState = _currentState;
       if (latestState == null) return;
+      if (!mounted) return;
       state = AsyncData(
         latestState.copyWith(
           pendingAvailabilityProductIds: {
@@ -225,6 +231,7 @@ class AdminProductListController
         ),
       );
     } catch (_) {
+      if (!mounted) return;
       state = AsyncData(currentState);
       rethrow;
     }
@@ -269,6 +276,7 @@ class AdminProductListController
           );
       final latestState = _currentState;
       if (latestState == null) return;
+      if (!mounted) return;
       state = AsyncData(
         latestState.copyWith(
           pendingStockProductIds: {
@@ -278,6 +286,7 @@ class AdminProductListController
         ),
       );
     } catch (_) {
+      if (!mounted) return;
       state = AsyncData(currentState);
       rethrow;
     }
@@ -301,6 +310,7 @@ class AdminProductListController
       await _ref.read(productRepositoryProvider).deleteProduct(productId);
       await loadInitial();
     } catch (_) {
+      if (!mounted) return;
       state = AsyncData(currentState);
       rethrow;
     }

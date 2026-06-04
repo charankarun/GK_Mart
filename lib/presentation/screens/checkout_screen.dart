@@ -565,11 +565,11 @@ class _CheckoutInput extends StatelessWidget {
       keyboardType: keyboardType,
       maxLines: maxLines,
       validator: validator,
+      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
       decoration: InputDecoration(
         labelText: label,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-        ),
+        alignLabelWithHint: maxLines > 1,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
     );
   }
@@ -586,7 +586,10 @@ class _PaymentMethodCard extends StatelessWidget {
         children: [
           Icon(Icons.payments, color: AppColors.primary),
           SizedBox(width: 10),
-          Text(CheckoutText.cashOnDelivery),
+          Text(
+            CheckoutText.cashOnDelivery,
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
           Spacer(),
           Icon(Icons.check_circle, color: AppColors.primary),
         ],
@@ -610,12 +613,18 @@ class _CheckoutSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: BorderRadius.circular(AppRadii.lg),
         border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.soft,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -664,50 +673,73 @@ class _CheckoutSummary extends StatelessWidget {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 14,
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 12,
             offset: const Offset(0, -4),
           ),
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          _SummaryRow(
-            label: CheckoutText.originalAmount,
-            value: '\u20B9${_formatPrice(pricing.originalAmount)}',
-          ),
-          const SizedBox(height: 6),
-          _SummaryRow(
-            label: CheckoutText.cartDiscount,
-            value: pricing.cartDiscount > 0
-                ? '-\u20B9${_formatPrice(pricing.cartDiscount)}'
-                : '\u20B90',
-            valueColor: AppColors.primary,
-          ),
-          const SizedBox(height: 6),
-          _SummaryRow(
-            label: CheckoutText.deliveryFee,
-            value: pricing.deliveryFee > 0
-                ? '\u20B9${_formatPrice(pricing.deliveryFee)}'
-                : CheckoutText.free,
-            valueColor: pricing.deliveryFee > 0 ? null : AppColors.primary,
-          ),
-          if (pricing.totalSavings > 0) ...[
-            const SizedBox(height: 6),
-            _SummaryRow(
-              label: CheckoutText.totalSavings,
-              value: '\u20B9${_formatPrice(pricing.totalSavings)}',
-              valueColor: AppColors.primary,
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF9FAFB),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
             ),
-          ],
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 10),
-            child: Divider(height: 1, color: AppColors.border),
-          ),
-          _SummaryRow(
-            label: CheckoutText.finalPayable,
-            value: '\u20B9${_formatPrice(pricing.finalPayable)}',
-            isBold: true,
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Bill Details',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.text,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _SummaryRow(
+                  label: CheckoutText.originalAmount,
+                  value: '\u20B9${_formatPrice(pricing.originalAmount)}',
+                ),
+                const SizedBox(height: 6),
+                _SummaryRow(
+                  label: CheckoutText.cartDiscount,
+                  value: pricing.cartDiscount > 0
+                      ? '-\u20B9${_formatPrice(pricing.cartDiscount)}'
+                      : '\u20B90',
+                  valueColor: AppColors.primary,
+                ),
+                const SizedBox(height: 6),
+                _SummaryRow(
+                  label: CheckoutText.deliveryFee,
+                  value: pricing.deliveryFee > 0
+                      ? '\u20B9${_formatPrice(pricing.deliveryFee)}'
+                      : CheckoutText.free,
+                  valueColor: pricing.deliveryFee > 0 ? null : AppColors.primary,
+                ),
+                if (pricing.totalSavings > 0) ...[
+                  const SizedBox(height: 6),
+                  _SummaryRow(
+                    label: CheckoutText.totalSavings,
+                    value: '\u20B9${_formatPrice(pricing.totalSavings)}',
+                    valueColor: AppColors.primary,
+                  ),
+                ],
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Divider(height: 1, color: AppColors.border),
+                ),
+                _SummaryRow(
+                  label: CheckoutText.finalPayable,
+                  value: '\u20B9${_formatPrice(pricing.finalPayable)}',
+                  isBold: true,
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 14),
           SizedBox(
@@ -716,9 +748,11 @@ class _CheckoutSummary extends StatelessWidget {
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppRadii.md),
                 ),
+                elevation: 0,
               ),
               onPressed: isLoading || isStoreClosed ? null : onPlaceOrder,
               child: isLoading
@@ -730,7 +764,10 @@ class _CheckoutSummary extends StatelessWidget {
                         color: Colors.white,
                       ),
                     )
-                  : const Text(CheckoutText.placeOrder),
+                  : const Text(
+                      CheckoutText.placeOrder,
+                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white),
+                    ),
             ),
           ),
         ],
@@ -763,7 +800,13 @@ class _SummaryRow extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(fontWeight: weight)),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(fontWeight: weight),
+          ),
+        ),
+        const SizedBox(width: 8),
         Text(
           value,
           style: TextStyle(
