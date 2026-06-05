@@ -1,6 +1,6 @@
 import * as functions from "firebase-functions/v2";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
-
 admin.initializeApp();
 const db = admin.firestore();
 
@@ -29,14 +29,15 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
           const productDoc = productDocs[i];
-          if (productDoc.exists) {
-            const productData = productDoc.data();
-            const trackStock = productData?.trackStock ?? (productData?.stockQuantity != null);
-            if (trackStock) {
-              const currentStock = productData?.stockQuantity || 0;
-              if (currentStock < item.quantity) {
-                throw new Error(`Out of stock: ${item.name}`);
-              }
+          if (!productDoc.exists) {
+            throw new Error(`Product no longer available: ${item.name || item.productId}`);
+          }
+          const productData = productDoc.data();
+          const trackStock = productData?.trackStock ?? (productData?.stockQuantity != null);
+          if (trackStock) {
+            const currentStock = productData?.stockQuantity || 0;
+            if (currentStock < item.quantity) {
+              throw new Error(`Out of stock: ${item.name}`);
             }
           }
         }
@@ -162,8 +163,13 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
     
     if (!before || !after) return;
     
-    // Only process when status changes TO Cancellation_Requested
-    if (before.status === "Cancellation_Requested" || after.status !== "Cancellation_Requested") {
+    // Only process when status changes to Cancelled or Cancellation_Requested for the FIRST time
+    // If it was already cancelled or requested, do not restore stock again (prevent duplicate restorations)
+    if (before.status === "Cancelled" || before.status === "Cancellation_Requested") {
+      return;
+    }
+
+    if (after.status !== "Cancellation_Requested" && after.status !== "Cancelled") {
       return;
     }
 
@@ -258,3 +264,33 @@ export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
     }
   }
 );
+
+export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) => {
+  const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
+  
+  try {
+    const snapshot = await db.collection("orders")
+      .where("status", "==", "Pending")
+      .where("timestamp", "<", admin.firestore.Timestamp.fromDate(fifteenMinsAgo))
+      .get();
+
+    if (snapshot.empty) {
+      console.log("No stuck pending orders found.");
+      return;
+    }
+
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => {
+      batch.update(doc.ref, {
+        status: "Failed",
+        failureReason: "Transaction Timeout (Order stuck in Pending)",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+
+    await batch.commit();
+    console.log(`Cleaned up ${snapshot.size} stuck pending orders.`);
+  } catch (error) {
+    console.error("Error cleaning up stuck pending orders:", error);
+  }
+});
