@@ -120,6 +120,8 @@ class CreateOrderRequest {
 }
 
 class OrderStatus {
+  static const pending = 'Pending';
+  static const cancellationRequested = 'Cancellation_Requested';
   static const placed = 'Placed';
   static const confirmed = 'Order Confirmed';
   static const packed = 'Packed';
@@ -129,6 +131,8 @@ class OrderStatus {
   static const cancelled = 'Cancelled';
 
   static const values = [
+    pending,
+    cancellationRequested,
     placed,
     confirmed,
     packed,

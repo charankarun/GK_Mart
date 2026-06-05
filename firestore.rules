@@ -82,6 +82,8 @@ service cloud.firestore {
 
     function validOrderStatus(status) {
       return status in [
+        'Pending',
+        'Cancellation_Requested',
         'Placed',
         'Order Confirmed',
         'Packed',
@@ -159,7 +161,7 @@ service cloud.firestore {
         && data.orderId == orderId
         && validOrderId(orderId)
         && data.userId == request.auth.uid
-        && data.status == 'Placed'
+        && data.status in ['Placed', 'Pending']
         && data.items is list
         && data.items.size() > 0
         && data.items.size() <= 100
@@ -533,8 +535,8 @@ service cloud.firestore {
           signedIn()
           && resource.data.userId == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'timestamp'])
-          && request.resource.data.status == 'Cancelled'
-          && resource.data.status in ['Placed', 'Order Confirmed', 'Packed']
+          && request.resource.data.status in ['Cancelled', 'Cancellation_Requested']
+          && resource.data.status in ['Placed', 'Pending', 'Order Confirmed', 'Packed']
         );
       allow delete: if false;
     }
@@ -578,16 +580,7 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if true;
       allow create: if isAdmin() && validProductCreate();
-      allow update: if (isAdmin() && validProductUpdate())
-        || (
-          signedIn()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockQuantity', 'isAvailable', 'updatedAt'])
-          && request.resource.data.get('stockQuantity', 0) is number
-          && resource.data.get('stockQuantity', 0) is number
-          && request.resource.data.get('stockQuantity', 0) < resource.data.get('stockQuantity', 0)
-          && request.resource.data.get('isAvailable', true) == true
-          && request.resource.data.get('updatedAt', request.time) == request.time
-        );
+      allow update: if isAdmin() && validProductUpdate();
       allow delete: if isAdmin();
     }
 
