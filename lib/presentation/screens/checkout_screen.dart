@@ -258,22 +258,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       ref.invalidate(adminOrderListProvider);
       ref.invalidate(dashboardRecentOrdersProvider);
 
-      _logCheckoutOrder('Notification started');
-      unawaited(
-        NotificationService.instance.notifyOrderPlaced(
-          userId: userId,
-          orderId: orderId,
-          customerName: nameController.text.trim(),
-          phone: normalizedPhone,
-          amount: pricing.finalPayable,
-          date: DateTime.now(),
-          status: OrderStatus.placed,
-        ).then((_) {
-          _logCheckoutOrder('Notification succeeded');
-        }).catchError((error) {
-          _logCheckoutOrder('Notification failed', error: error);
-        }),
-      );
+      _logCheckoutOrder('Backend will handle notification');
       ref.read(cartControllerProvider.notifier).clear();
       ref.read(orderCreationControllerProvider.notifier).reset();
 

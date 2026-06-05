@@ -204,16 +204,7 @@ class OrderStatusUpdateController extends Notifier<Map<String, String>> {
       final nextState = Map<String, String>.from(state)..remove(orderId);
       state = nextState;
 
-      // Notify the customer that their order status has changed.
-      if (targetUserId.trim().isNotEmpty) {
-        unawaited(
-          NotificationService.instance.enqueueOrderStatusNotification(
-            targetUserId: targetUserId.trim(),
-            orderId: orderId,
-            status: normalizedStatus,
-          ),
-        );
-      }
+      // Backend handles notifications automatically via Cloud Functions.
     } catch (_) {
       final nextState = Map<String, String>.from(state);
       if (previousStatus == null) {

@@ -528,12 +528,7 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      // Customers can create notifications (order placed events) for themselves
-      // or admin-targeted events. Admins can create status-update notifications.
-      allow create: if signedIn()
-        && request.resource.data.keys().hasAll(['type', 'createdAt'])
-        && request.resource.data.get('type', '') is string
-        && request.resource.data.createdAt == request.time;
+      allow create: if false; // Backend only
       // Customers can read their own notifications; admins can read admin-targeted ones.
       allow read: if signedIn()
         && (

@@ -14,7 +14,7 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
     if (order.status !== "Pending") return;
 
     try {
-      await db.runTransaction(async (transaction) => {
+      const generatedOrderId = await db.runTransaction(async (transaction) => {
         const orderRef = db.collection("orders").doc(event.params.orderId);
         
         // 1. Read products
@@ -82,7 +82,67 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
           status: "Placed",
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
+        
+        return officialOrderId;
       });
+
+      // Secondary Block (Post-Commit) - Notifications
+      try {
+        const batch = db.batch();
+        const dateStr = new Date().toISOString();
+        
+        // Use deterministic IDs
+        const custNotifRef = db.collection("notifications").doc(`customer_order_placed_${event.params.orderId}`);
+        const adminNotifRef = db.collection("notifications").doc(`admin_new_order_${event.params.orderId}`);
+
+        const amount = order.totalAmount || 0;
+        const amountStr = amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2);
+        const title = `Order Placed - ${generatedOrderId}`;
+        const body = `Your order of ₹${amountStr} has been successfully placed.`;
+        const adminBody = `New order ${generatedOrderId} placed by ${order.userName || order.customerName || 'Customer'} for ₹${amountStr}.`;
+
+        batch.set(custNotifRef, {
+          type: "customer_order_placed",
+          eventType: "customer_order_placed",
+          targetUserId: order.userId,
+          targetRole: "",
+          sourceUserId: "",
+          sourceInstanceId: "backend",
+          orderId: event.params.orderId,
+          status: "placed",
+          title: title,
+          body: body,
+          amount: amountStr,
+          customerName: order.userName || order.customerName || "",
+          phone: order.phone || "",
+          date: dateStr,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          isRead: false
+        });
+
+        batch.set(adminNotifRef, {
+          type: "admin_new_order",
+          eventType: "admin_new_order",
+          targetUserId: "",
+          targetRole: "admin",
+          sourceUserId: "",
+          sourceInstanceId: "backend",
+          orderId: event.params.orderId,
+          status: "placed",
+          title: `New Order: ${generatedOrderId}`,
+          body: adminBody,
+          amount: amountStr,
+          customerName: order.userName || order.customerName || "",
+          phone: order.phone || "",
+          date: dateStr,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          isRead: false
+        });
+
+        await batch.commit();
+      } catch (error) {
+        console.error("Non-critical failure: Could not create notifications.", error);
+      }
     } catch (error: any) {
       // Transaction failed
       await db.collection("orders").doc(event.params.orderId).update({
@@ -150,6 +210,51 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
       });
     } catch (error: any) {
       console.error("Cancellation failed", error);
+    }
+  }
+);
+
+export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
+  "orders/{orderId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    
+    if (!before || !after) return;
+    
+    if (before.status === after.status) return;
+
+    // Ignore transitions handled explicitly elsewhere (like cancellation requests starting up)
+    if (after.status === "Cancellation_Requested" || after.status === "Pending") return;
+
+    const status = after.status;
+    const orderId = event.params.orderId;
+    const targetUserId = after.userId;
+
+    const normalizedStatus = status.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
+    try {
+      const notifRef = db.collection("notifications").doc(`customer_status_${orderId}_${normalizedStatus}`);
+      await notifRef.set({
+        type: "order_status",
+        eventType: "order_status",
+        targetUserId: targetUserId,
+        targetRole: "",
+        sourceUserId: "",
+        sourceInstanceId: "backend",
+        orderId: orderId,
+        status: normalizedStatus,
+        title: `Order ${status}`,
+        body: `Your order is now ${status}.`,
+        amount: "",
+        customerName: after.userName || after.customerName || "",
+        phone: after.phone || "",
+        date: new Date().toISOString(),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        isRead: false
+      });
+    } catch (error) {
+      console.error("Non-critical failure: Could not create status notification.", error);
     }
   }
 );
