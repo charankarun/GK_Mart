@@ -1,5 +1,6 @@
 import * as functions from "firebase-functions/v2";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import * as v1 from "firebase-functions/v1";
 import * as admin from "firebase-admin";
 admin.initializeApp();
 const db = admin.firestore();
@@ -238,9 +239,10 @@ export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
     const targetUserId = after.userId;
 
     const normalizedStatus = status.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const eventId = event.id || Date.now().toString();
 
     try {
-      const notifRef = db.collection("notifications").doc(`customer_status_${orderId}_${normalizedStatus}`);
+      const notifRef = db.collection("notifications").doc(`customer_status_${orderId}_${normalizedStatus}_${eventId}`);
       await notifRef.set({
         type: "order_status",
         eventType: "order_status",
@@ -292,5 +294,53 @@ export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) =
     console.log(`Cleaned up ${snapshot.size} stuck pending orders.`);
   } catch (error) {
     console.error("Error cleaning up stuck pending orders:", error);
+  }
+});
+
+export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
+  const uid = user.uid;
+  
+  try {
+    let batch = db.batch();
+    let count = 0;
+
+    // 1. Delete user documents
+    batch.delete(db.collection("users").doc(uid));
+    batch.delete(db.collection("carts").doc(uid));
+    batch.delete(db.collection("wishlist").doc(uid));
+    count += 3;
+
+    // 2. Anonymize Orders
+    const ordersSnapshot = await db.collection("orders").where("userId", "==", uid).get();
+    
+    for (const doc of ordersSnapshot.docs) {
+      batch.update(doc.ref, {
+        userName: "Deleted User",
+        customerName: "Deleted User",
+        phone: "Redacted",
+        address: "Redacted",
+        email: "Redacted",
+        searchTokens: [],
+        userDeleted: true,
+        deletedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      count++;
+      
+      // Handle Firestore 500 operation limit per batch
+      if (count === 500) {
+        await batch.commit();
+        batch = db.batch();
+        count = 0;
+      }
+    }
+
+    // Commit any remaining operations
+    if (count > 0) {
+      await batch.commit();
+    }
+    
+    console.log(`Successfully processed deletion for user ${uid}. Anonymized ${ordersSnapshot.size} orders.`);
+  } catch (error) {
+    console.error(`Error processing deletion for user ${uid}:`, error);
   }
 });
