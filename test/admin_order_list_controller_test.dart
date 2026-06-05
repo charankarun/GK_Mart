@@ -5,6 +5,7 @@ import 'package:supermarket_app/domain/entities/cart_item.dart';
 import 'package:supermarket_app/domain/entities/customer_order.dart';
 import 'package:supermarket_app/domain/entities/order_analytics.dart';
 import 'package:supermarket_app/domain/entities/order_page.dart';
+import 'package:supermarket_app/domain/entities/product_stats.dart';
 import 'package:supermarket_app/domain/repositories/order_repository.dart';
 import 'package:supermarket_app/presentation/providers/auth_providers.dart';
 import 'package:supermarket_app/presentation/providers/order_providers.dart';
@@ -58,11 +59,12 @@ void main() {
           isAdminProvider.overrideWith((ref) => Stream<bool>.value(true)),
           orderRepositoryProvider.overrideWith((ref) => repository),
           dashboardInventoryStatsProvider.overrideWith((ref) async {
-            return const DashboardInventoryStats(
+            return const ProductStats(
               totalProducts: 3,
               availableProducts: 2,
               outOfStockProducts: 1,
               lowStockProducts: 1,
+              totalCategories: 0,
             );
           }),
         ],

@@ -7,6 +7,7 @@ import 'package:supermarket_app/domain/entities/cart_item.dart';
 import 'package:supermarket_app/domain/entities/product.dart';
 import 'package:supermarket_app/domain/entities/product_page.dart';
 import 'package:supermarket_app/domain/entities/product_image_upload.dart';
+import 'package:supermarket_app/domain/entities/product_stats.dart';
 import 'package:supermarket_app/domain/repositories/cart_repository.dart';
 import 'package:supermarket_app/domain/repositories/product_repository.dart';
 import 'package:supermarket_app/domain/repositories/user_repository.dart';
@@ -241,6 +242,11 @@ class _FakeProductRepository implements ProductRepository {
 
   @override
   Future<void> deleteProduct(String productId) async {}
+
+  @override
+  Future<ProductStats> fetchInventoryStats() async {
+    return ProductStats.fromProducts(_products);
+  }
 }
 
 class _FakeWishlistRepository implements WishlistRepository {

@@ -13,6 +13,7 @@ import '../../../core/images/image_upload_processor.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../domain/entities/category.dart';
 import '../../../domain/entities/product.dart';
+import '../../../domain/entities/product_stats.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/catalog_providers.dart';
 import '../../providers/product_provider.dart';
@@ -168,7 +169,7 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
           if (index == 0) {
             return Column(
               children: [
-                _InventorySummary(products: state.products),
+                const _InventorySummary(),
                 const SizedBox(height: 12),
                 _InventoryFilters(
                   searchController: _searchController,
@@ -489,21 +490,21 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
   }
 }
 
-class _InventorySummary extends StatelessWidget {
-  const _InventorySummary({required this.products});
-
-  final List<Product> products;
+class _InventorySummary extends ConsumerWidget {
+  const _InventorySummary({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final availableCount = products.where((product) {
-      return product.isAvailable && !product.isStockEmpty;
-    }).length;
-    final outOfStockCount = products.where((product) {
-      return !product.isAvailable || product.isStockEmpty;
-    }).length;
-    final lowStockCount =
-        products.where((product) => product.isLowStock).length;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final statsAsync = ref.watch(dashboardInventoryStatsProvider);
+    final stats = statsAsync.maybeWhen(
+      data: (data) => data,
+      orElse: () => null,
+    );
+
+    final total = stats?.totalProducts.toString() ?? '...';
+    final available = stats?.availableProducts.toString() ?? '...';
+    final lowStock = stats?.lowStockProducts.toString() ?? '...';
+    final outOfStock = stats?.outOfStockProducts.toString() ?? '...';
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -535,22 +536,22 @@ class _InventorySummary extends StatelessWidget {
             children: [
               _SummaryMetric(
                 label: ProductManagementText.totalProducts,
-                value: products.length.toString(),
+                value: total,
                 color: AppColors.primary,
               ),
               _SummaryMetric(
                 label: ProductManagementText.available,
-                value: availableCount.toString(),
+                value: available,
                 color: AppColors.primary,
               ),
               _SummaryMetric(
                 label: ProductManagementText.lowStock,
-                value: lowStockCount.toString(),
+                value: lowStock,
                 color: ProductManagementColors.warning,
               ),
               _SummaryMetric(
                 label: ProductManagementText.outOfStock,
-                value: outOfStockCount.toString(),
+                value: outOfStock,
                 color: ProductManagementColors.danger,
               ),
             ],

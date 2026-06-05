@@ -8,20 +8,21 @@ import '../../core/constants/app_constants.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/product_image_upload.dart';
 import '../../domain/entities/product_page.dart';
+import '../../domain/entities/product_stats.dart';
 import 'repository_providers.dart';
 
 final dashboardInventoryStatsProvider =
-    FutureProvider.autoDispose<DashboardInventoryStats>((ref) async {
+    FutureProvider.autoDispose<ProductStats>((ref) async {
   _dashboardLog(
-    'Inventory query start limit=${ProductProviderConfig.inventoryStatsLimit}',
+    'Inventory query start via fetchInventoryStats()',
   );
   try {
-    final page = await ref
+    final stats = await ref
         .watch(productRepositoryProvider)
-        .fetchProductsPage(limit: ProductProviderConfig.inventoryStatsLimit)
+        .fetchInventoryStats()
         .timeout(AppDurations.dashboardTimeout);
-    _dashboardLog('Inventory query result count=${page.products.length}');
-    return DashboardInventoryStats.fromProducts(page.products);
+    _dashboardLog('Inventory stats fetched totalProducts=${stats.totalProducts}');
+    return stats;
   } catch (error, stackTrace) {
     _dashboardLog(
       'Riverpod dashboardInventoryStatsProvider exception',
@@ -36,39 +37,6 @@ final adminProductListProvider = StateNotifierProvider.autoDispose<
     AdminProductListController, AsyncValue<AdminProductListState>>((ref) {
   return AdminProductListController(ref)..loadInitial();
 });
-
-class DashboardInventoryStats {
-  const DashboardInventoryStats({
-    required this.totalProducts,
-    required this.availableProducts,
-    required this.outOfStockProducts,
-    required this.lowStockProducts,
-  });
-
-  final int totalProducts;
-  final int availableProducts;
-  final int outOfStockProducts;
-  final int lowStockProducts;
-
-  factory DashboardInventoryStats.fromProducts(Iterable<Product> products) {
-    var totalProducts = 0;
-    var availableProducts = 0;
-    var lowStockProducts = 0;
-
-    for (final product in products) {
-      totalProducts += 1;
-      if (product.isAvailable && !product.isStockEmpty) availableProducts += 1;
-      if (product.isLowStock) lowStockProducts += 1;
-    }
-
-    return DashboardInventoryStats(
-      totalProducts: totalProducts,
-      availableProducts: availableProducts,
-      outOfStockProducts: totalProducts - availableProducts,
-      lowStockProducts: lowStockProducts,
-    );
-  }
-}
 
 class AdminProductListController
     extends StateNotifier<AsyncValue<AdminProductListState>> {
@@ -179,7 +147,7 @@ class AdminProductListController
       } else {
         await repository.addProduct(product);
       }
-
+      _ref.invalidate(dashboardInventoryStatsProvider);
       await loadInitial();
     } catch (error, stackTrace) {
       if (!mounted) return;
@@ -218,6 +186,7 @@ class AdminProductListController
             productId: productId,
             isAvailable: isAvailable,
           );
+      _ref.invalidate(dashboardInventoryStatsProvider);
       final latestState = _currentState;
       if (latestState == null) return;
       if (!mounted) return;
@@ -274,6 +243,7 @@ class AdminProductListController
             productId: productId,
             stockQuantity: stockQuantity,
           );
+      _ref.invalidate(dashboardInventoryStatsProvider);
       final latestState = _currentState;
       if (latestState == null) return;
       if (!mounted) return;
@@ -308,6 +278,7 @@ class AdminProductListController
 
     try {
       await _ref.read(productRepositoryProvider).deleteProduct(productId);
+      _ref.invalidate(dashboardInventoryStatsProvider);
       await loadInitial();
     } catch (_) {
       if (!mounted) return;

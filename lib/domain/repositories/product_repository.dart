@@ -1,6 +1,7 @@
 import '../entities/product.dart';
 import '../entities/product_image_upload.dart';
 import '../entities/product_page.dart';
+import '../entities/product_stats.dart';
 
 abstract class ProductRepository {
   Stream<List<Product>> watchProducts({int limit = 40});
@@ -42,4 +43,6 @@ abstract class ProductRepository {
   Future<String> uploadProductImage(ProductImageUpload upload);
 
   Future<void> deleteProduct(String productId);
+
+  Future<ProductStats> fetchInventoryStats();
 }

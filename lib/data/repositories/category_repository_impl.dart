@@ -115,11 +115,12 @@ class CategoryRepositoryImpl implements CategoryRepository {
   Future<void> addCategory(Category category) {
     return RepositoryGuard.run(
       message: 'Unable to add category.',
-      action: () {
+      action: () async {
         final model = CategoryModel.fromEntity(category);
-        return _categories
+        await _categories
             .add(model.toFirestore(includeCreatedAt: true))
             .timeout(AppDurations.networkTimeout);
+        await _updateCategoryStats();
       },
     );
   }
@@ -133,15 +134,16 @@ class CategoryRepositoryImpl implements CategoryRepository {
 
     return RepositoryGuard.run(
       message: 'Unable to update category.',
-      action: () {
+      action: () async {
         final model = CategoryModel.fromEntity(category);
-        return _categories
+        await _categories
             .doc(categoryId)
             .set(
               model.toFirestore(includeCreatedAt: false),
               SetOptions(merge: true),
             )
             .timeout(AppDurations.networkTimeout);
+        await _updateCategoryStats();
       },
     );
   }
@@ -155,12 +157,26 @@ class CategoryRepositoryImpl implements CategoryRepository {
 
     return RepositoryGuard.run(
       message: 'Unable to delete category.',
-      action: () {
-        return _categories.doc(normalizedCategoryId).delete().timeout(
+      action: () async {
+        await _categories.doc(normalizedCategoryId).delete().timeout(
               AppDurations.networkTimeout,
             );
+        await _updateCategoryStats();
       },
     );
+  }
+
+  Future<void> _updateCategoryStats() async {
+    final categoriesSnapshot = await _categories.get().timeout(AppDurations.networkTimeout);
+    final count = categoriesSnapshot.docs.length;
+
+    await _firestore
+        .collection(FirestoreCollections.systemStats)
+        .doc(FirestoreDocuments.dashboardStats)
+        .set({
+          'totalCategories': count,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true)).timeout(AppDurations.networkTimeout);
   }
 
   @override

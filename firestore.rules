@@ -620,6 +620,10 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /system_stats/{documentId} {
+      allow read, write: if isAdmin();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

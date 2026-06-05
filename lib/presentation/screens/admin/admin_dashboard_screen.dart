@@ -6,6 +6,7 @@ import '../../../core/errors/app_error_handler.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../domain/entities/order.dart';
 import '../../../domain/entities/order_analytics.dart';
+import '../../../domain/entities/product_stats.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/order_providers.dart';
 import '../../providers/product_provider.dart';
@@ -359,7 +360,7 @@ class _DashboardMetricsGrid extends StatelessWidget {
   });
 
   final _OrderDashboardStats stats;
-  final AsyncValue<DashboardInventoryStats> inventoryStatsAsync;
+  final AsyncValue<ProductStats> inventoryStatsAsync;
   final VoidCallback onOpenAllOrders;
   final VoidCallback onOpenSelectedDateOrders;
 

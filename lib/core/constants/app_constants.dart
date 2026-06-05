@@ -37,6 +37,7 @@ class FirestoreCollections {
   static const products = 'products';
   static const users = 'users';
   static const wishlist = 'wishlist';
+  static const systemStats = 'system_stats';
 }
 
 class FirestoreSubcollections {
@@ -50,6 +51,7 @@ class FirestoreDocuments {
 
   static const admins = 'admins';
   static const ordersCounter = 'orders';
+  static const dashboardStats = 'dashboard';
 }
 
 class FirestoreFields {

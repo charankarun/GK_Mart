@@ -9,6 +9,7 @@ import '../../core/storage/storage_image_uploader.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/product_image_upload.dart';
 import '../../domain/entities/product_page.dart';
+import '../../domain/entities/product_stats.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../models/product_model.dart';
 
@@ -307,11 +308,12 @@ class ProductRepositoryImpl implements ProductRepository {
   Future<void> addProduct(Product product) {
     return RepositoryGuard.run(
       message: 'Unable to add product.',
-      action: () {
+      action: () async {
         final model = ProductModel.fromEntity(product);
-        return _products
+        await _products
             .add(model.toFirestore(includeCreatedAt: true))
             .timeout(AppDurations.networkTimeout);
+        await _recalculateAndSaveStats();
       },
     );
   }
@@ -325,9 +327,9 @@ class ProductRepositoryImpl implements ProductRepository {
 
     return RepositoryGuard.run(
       message: 'Unable to update product.',
-      action: () {
+      action: () async {
         final model = ProductModel.fromEntity(product);
-        return _products
+        await _products
             .doc(productId)
             .set(
               model.toFirestore(
@@ -337,6 +339,7 @@ class ProductRepositoryImpl implements ProductRepository {
               SetOptions(merge: true),
             )
             .timeout(AppDurations.networkTimeout);
+        await _recalculateAndSaveStats();
       },
     );
   }
@@ -353,11 +356,12 @@ class ProductRepositoryImpl implements ProductRepository {
 
     return RepositoryGuard.run(
       message: 'Unable to update stock status.',
-      action: () {
-        return _products.doc(normalizedProductId).update({
+      action: () async {
+        await _products.doc(normalizedProductId).update({
           ProductField.isAvailable: isAvailable,
           ProductField.updatedAt: FieldValue.serverTimestamp(),
         }).timeout(AppDurations.networkTimeout);
+        await _recalculateAndSaveStats();
       },
     );
   }
@@ -381,12 +385,13 @@ class ProductRepositoryImpl implements ProductRepository {
 
     return RepositoryGuard.run(
       message: 'Unable to update stock quantity.',
-      action: () {
-        return _products.doc(normalizedProductId).update({
+      action: () async {
+        await _products.doc(normalizedProductId).update({
           ProductField.stockQuantity: stockQuantity,
           ProductField.isAvailable: stockQuantity > 0,
           ProductField.updatedAt: FieldValue.serverTimestamp(),
         }).timeout(AppDurations.networkTimeout);
+        await _recalculateAndSaveStats();
       },
     );
   }
@@ -442,12 +447,98 @@ class ProductRepositoryImpl implements ProductRepository {
 
     return RepositoryGuard.run(
       message: 'Unable to delete product.',
-      action: () {
-        return _products.doc(normalizedProductId).delete().timeout(
+      action: () async {
+        await _products.doc(normalizedProductId).delete().timeout(
               AppDurations.networkTimeout,
             );
+        await _recalculateAndSaveStats();
       },
     );
+  }
+
+  @override
+  Future<ProductStats> fetchInventoryStats() {
+    return RepositoryGuard.run(
+      message: 'Unable to fetch inventory statistics.',
+      action: () async {
+        final doc = await _firestore
+            .collection(FirestoreCollections.systemStats)
+            .doc(FirestoreDocuments.dashboardStats)
+            .get()
+            .timeout(AppDurations.networkTimeout);
+
+        if (!doc.exists) {
+          return await _recalculateAndSaveStats();
+        }
+
+        final data = doc.data();
+        if (data == null ||
+            data['totalProducts'] == null ||
+            data['availableProducts'] == null ||
+            data['outOfStockProducts'] == null ||
+            data['lowStockProducts'] == null ||
+            data['totalCategories'] == null) {
+          return await _recalculateAndSaveStats();
+        }
+
+        return ProductStats(
+          totalProducts: data['totalProducts'] as int,
+          availableProducts: data['availableProducts'] as int,
+          outOfStockProducts: data['outOfStockProducts'] as int,
+          lowStockProducts: data['lowStockProducts'] as int,
+          totalCategories: data['totalCategories'] as int,
+        );
+      },
+    );
+  }
+
+  Future<ProductStats> _recalculateAndSaveStats() async {
+    final productsSnapshot = await _products.get().timeout(AppDurations.networkTimeout);
+    final products = productsSnapshot.docs.map(ProductModel.fromFirestore).toList();
+
+    var totalProducts = 0;
+    var availableProducts = 0;
+    var lowStockProducts = 0;
+
+    for (final product in products) {
+      totalProducts += 1;
+      if (product.isAvailable && !product.isStockEmpty) {
+        availableProducts += 1;
+      }
+      if (product.isLowStock) {
+        lowStockProducts += 1;
+      }
+    }
+
+    final outOfStockProducts = totalProducts - availableProducts;
+
+    final categoriesSnapshot = await _firestore
+        .collection(FirestoreCollections.categories)
+        .get()
+        .timeout(AppDurations.networkTimeout);
+    final totalCategories = categoriesSnapshot.docs.length;
+
+    final stats = ProductStats(
+      totalProducts: totalProducts,
+      availableProducts: availableProducts,
+      outOfStockProducts: outOfStockProducts,
+      lowStockProducts: lowStockProducts,
+      totalCategories: totalCategories,
+    );
+
+    await _firestore
+        .collection(FirestoreCollections.systemStats)
+        .doc(FirestoreDocuments.dashboardStats)
+        .set({
+          'totalProducts': stats.totalProducts,
+          'availableProducts': stats.availableProducts,
+          'outOfStockProducts': stats.outOfStockProducts,
+          'lowStockProducts': stats.lowStockProducts,
+          'totalCategories': stats.totalCategories,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }).timeout(AppDurations.networkTimeout);
+
+    return stats;
   }
 
   Future<Query<Map<String, dynamic>>> _startAfterProductCursor({
