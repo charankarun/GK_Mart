@@ -102,29 +102,6 @@ service cloud.firestore {
         );
     }
 
-    function validOrderCounterCreate(counterId) {
-      let data = request.resource.data;
-      return counterId == 'orders'
-        && signedIn()
-        && data.keys().hasOnly(['next', 'updatedAt'])
-        && data.keys().hasAll(['next', 'updatedAt'])
-        && data.next is number
-        && data.next >= 2
-        && data.updatedAt == request.time;
-    }
-
-    function validOrderCounterUpdate(counterId) {
-      let data = request.resource.data;
-      return counterId == 'orders'
-        && signedIn()
-        && data.keys().hasOnly(['next', 'updatedAt'])
-        && data.keys().hasAll(['next', 'updatedAt'])
-        && data.next is number
-        && resource.data.next is number
-        && data.next == resource.data.next + 1
-        && data.updatedAt == request.time;
-    }
-
     function validOrderCreate(orderId) {
       let data = request.resource.data;
       return data.keys().hasOnly([
@@ -161,7 +138,7 @@ service cloud.firestore {
         && data.orderId == orderId
         && validOrderId(orderId)
         && data.userId == request.auth.uid
-        && data.status in ['Placed', 'Pending']
+        && data.status == 'Pending'
         && data.items is list
         && data.items.size() > 0
         && data.items.size() <= 100
@@ -542,10 +519,7 @@ service cloud.firestore {
     }
 
     match /counters/{counterId} {
-      allow read: if signedIn() && counterId == 'orders';
-      allow create: if validOrderCounterCreate(counterId);
-      allow update: if validOrderCounterUpdate(counterId);
-      allow delete: if false;
+      allow read, write: if false;
     }
 
     match /store_settings/{documentId} {
