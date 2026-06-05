@@ -281,16 +281,28 @@ export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) =
       return;
     }
 
-    const batch = db.batch();
-    snapshot.docs.forEach((doc) => {
+    let batch = db.batch();
+    let count = 0;
+
+    for (const doc of snapshot.docs) {
       batch.update(doc.ref, {
         status: "Failed",
         failureReason: "Transaction Timeout (Order stuck in Pending)",
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
-    });
+      count++;
 
-    await batch.commit();
+      if (count === 500) {
+        await batch.commit();
+        batch = db.batch();
+        count = 0;
+      }
+    }
+
+    if (count > 0) {
+      await batch.commit();
+    }
+    
     console.log(`Cleaned up ${snapshot.size} stuck pending orders.`);
   } catch (error) {
     console.error("Error cleaning up stuck pending orders:", error);
