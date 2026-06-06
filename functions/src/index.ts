@@ -878,3 +878,62 @@ export const recalibrateOrderAnalytics = functions.https.onCall(
     }
   }
 );
+
+export const processAuthoritativeAnalytics = functions.firestore.onDocumentUpdated(
+  "orders/{orderId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+
+    if (!before || !after) return;
+
+    const beforeStatus = before.status;
+    const afterStatus = after.status;
+
+    // Trigger only on Pending -> Placed
+    if (beforeStatus !== 'Pending' || afterStatus !== 'Placed') {
+      return;
+    }
+
+    const orderId = event.params.orderId;
+    const ledgerRef = db.collection('analytics_ledger').doc(`purchase_placed_${orderId}`);
+    const analyticsRef = db.collection('system_stats').doc('authoritative_analytics');
+
+    const getRevenue = (data: any) => {
+      const fields = ['totalAmount', 'total', 'paymentAmount'];
+      for (const field of fields) {
+        let val = data[field];
+        if (val != null) {
+          if (typeof val === 'string') val = parseFloat(val);
+          if (typeof val === 'number' && !isNaN(val)) return val < 0 ? 0 : val;
+        }
+      }
+      return 0.0;
+    };
+
+    try {
+      await db.runTransaction(async (transaction) => {
+        const ledgerDoc = await transaction.get(ledgerRef);
+        if (ledgerDoc.exists) {
+          console.log(`Order ${orderId} already counted in authoritative analytics.`);
+          return;
+        }
+
+        const revenue = getRevenue(after);
+
+        transaction.set(ledgerRef, {
+          orderId: orderId,
+          processedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        transaction.set(analyticsRef, {
+          successfulPurchases: admin.firestore.FieldValue.increment(1),
+          successfulRevenue: admin.firestore.FieldValue.increment(revenue),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      });
+    } catch (error) {
+      console.error("Authoritative analytics transaction failed:", error);
+    }
+  }
+);
