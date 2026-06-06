@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+
 import '../../presentation/navigation/notification_navigation_service.dart';
 import 'repository_exception.dart';
 
@@ -18,6 +20,7 @@ class AppErrorHandler {
     FlutterError.onError = (details) {
       if (kDebugMode) FlutterError.presentError(details);
       _logFlutterError(details);
+      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
       if (!_isLayoutError(details.exception)) {
         showGlobalError(details.exception);
       }
@@ -30,7 +33,8 @@ class AppErrorHandler {
   }
 
   static void report(Object error, StackTrace stackTrace) {
-    _logError('Unhandled async exception', error, stackTrace);
+    _logError('Unhandled async exception', error, stackTrace, reportToCrashlytics: false);
+    FirebaseCrashlytics.instance.recordError(error, stackTrace, fatal: true);
     if (kDebugMode) {
       FlutterError.presentError(
         FlutterErrorDetails(exception: error, stack: stackTrace),
@@ -251,19 +255,24 @@ class AppErrorHandler {
       details.context?.toDescription() ?? 'Flutter framework exception',
       details.exception,
       details.stack,
+      reportToCrashlytics: false,
     );
   }
 
   static void _logError(
     String message,
     Object error,
-    StackTrace? stackTrace,
-  ) {
+    StackTrace? stackTrace, {
+    bool reportToCrashlytics = true,
+  }) {
     developer.log(
       message,
       name: 'AppErrorHandler',
       error: error,
       stackTrace: stackTrace,
     );
+    if (reportToCrashlytics) {
+      FirebaseCrashlytics.instance.recordError(error, stackTrace, reason: message, fatal: false);
+    }
   }
 }
