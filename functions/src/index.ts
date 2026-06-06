@@ -699,3 +699,182 @@ export const recalibrateInventoryStats = functions.https.onCall(
     }
   }
 );
+
+export const processOrderWrite = functions.firestore.onDocumentWritten(
+  "orders/{orderId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+
+    let ordersDelta = 0;
+    let pendingDelta = 0;
+    let deliveredDelta = 0;
+    let revenueDelta = 0.0;
+
+    const normalizeStatus = (status: any) => {
+      if (!status) return 'Placed';
+      const trimmed = String(status).trim();
+      if (!trimmed) return 'Placed';
+      const lowerStatus = trimmed.toLowerCase();
+
+      if (lowerStatus === 'pending') return 'Placed';
+      if (lowerStatus === 'confirmed' || lowerStatus === 'order confirmed') return 'Order Confirmed';
+      if (lowerStatus === 'processing') return 'Packed';
+      if (lowerStatus === 'out for delivery' || lowerStatus === 'out_for_delivery' || lowerStatus === 'out-for-delivery') return 'Out for Delivery';
+      if (lowerStatus === 'canceled') return 'Cancelled';
+
+      const validStatuses = [
+        'Pending', 'Cancellation_Requested', 'Placed', 'Order Confirmed',
+        'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'
+      ];
+
+      for (const valid of validStatuses) {
+        if (valid.toLowerCase() === lowerStatus) return valid;
+      }
+      return 'Placed';
+    };
+
+    const getRevenue = (data: any) => {
+      const fields = ['totalAmount', 'total', 'paymentAmount'];
+      for (const field of fields) {
+        let val = data[field];
+        if (val != null) {
+          if (typeof val === 'string') val = parseFloat(val);
+          if (typeof val === 'number' && !isNaN(val)) return val < 0 ? 0 : val;
+        }
+      }
+      return 0.0;
+    };
+
+    const evaluate = (data: any | undefined) => {
+      if (!data) return { exists: false, pending: false, delivered: false, revenue: 0.0 };
+      const status = normalizeStatus(data.status);
+      const isPending = status === 'Placed' || status === 'Packed' || status === 'Out for Delivery';
+      const isDelivered = status === 'Delivered';
+      const revenue = getRevenue(data);
+      return { exists: true, pending: isPending, delivered: isDelivered, revenue };
+    };
+
+    const b = evaluate(before);
+    const a = evaluate(after);
+
+    if (!b.exists && a.exists) ordersDelta += 1;
+    if (b.exists && !a.exists) ordersDelta -= 1;
+
+    if (!b.pending && a.pending) pendingDelta += 1;
+    if (b.pending && !a.pending) pendingDelta -= 1;
+
+    if (!b.delivered && a.delivered) deliveredDelta += 1;
+    if (b.delivered && !a.delivered) deliveredDelta -= 1;
+
+    revenueDelta = a.revenue - b.revenue;
+
+    if (ordersDelta === 0 && pendingDelta === 0 && deliveredDelta === 0 && revenueDelta === 0.0) {
+      return;
+    }
+
+    const updates: any = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (ordersDelta !== 0) updates.totalOrders = admin.firestore.FieldValue.increment(ordersDelta);
+    if (pendingDelta !== 0) updates.pendingOrders = admin.firestore.FieldValue.increment(pendingDelta);
+    if (deliveredDelta !== 0) updates.deliveredOrders = admin.firestore.FieldValue.increment(deliveredDelta);
+    if (revenueDelta !== 0.0) updates.revenue = admin.firestore.FieldValue.increment(revenueDelta);
+
+    try {
+      await db.collection("system_stats").doc("order_analytics").set(updates, { merge: true });
+    } catch (error) {
+      console.error("Failed to update order analytics:", error);
+    }
+  }
+);
+
+export const recalibrateOrderAnalytics = functions.https.onCall(
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Must be authenticated."
+      );
+    }
+    
+    const userDoc = await db.collection("users").doc(request.auth.uid).get();
+    const role = userDoc.data()?.role?.toString().trim().toLowerCase();
+    if (!userDoc.exists || (role !== "admin" && role !== "owner")) {
+       throw new functions.https.HttpsError(
+         "permission-denied",
+         "Must be an admin or owner to recalibrate stats."
+       );
+    }
+
+    const normalizeStatus = (status: any) => {
+      if (!status) return 'Placed';
+      const trimmed = String(status).trim();
+      if (!trimmed) return 'Placed';
+      const lowerStatus = trimmed.toLowerCase();
+
+      if (lowerStatus === 'pending') return 'Placed';
+      if (lowerStatus === 'confirmed' || lowerStatus === 'order confirmed') return 'Order Confirmed';
+      if (lowerStatus === 'processing') return 'Packed';
+      if (lowerStatus === 'out for delivery' || lowerStatus === 'out_for_delivery' || lowerStatus === 'out-for-delivery') return 'Out for Delivery';
+      if (lowerStatus === 'canceled') return 'Cancelled';
+
+      const validStatuses = [
+        'Pending', 'Cancellation_Requested', 'Placed', 'Order Confirmed',
+        'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'
+      ];
+
+      for (const valid of validStatuses) {
+        if (valid.toLowerCase() === lowerStatus) return valid;
+      }
+      return 'Placed';
+    };
+
+    const getRevenue = (data: any) => {
+      const fields = ['totalAmount', 'total', 'paymentAmount'];
+      for (const field of fields) {
+        let val = data[field];
+        if (val != null) {
+          if (typeof val === 'string') val = parseFloat(val);
+          if (typeof val === 'number' && !isNaN(val)) return val < 0 ? 0 : val;
+        }
+      }
+      return 0.0;
+    };
+
+    try {
+      let totalOrders = 0;
+      let pendingOrders = 0;
+      let deliveredOrders = 0;
+      let revenue = 0.0;
+
+      const ordersSnapshot = await db.collection("orders").get();
+      
+      for (const doc of ordersSnapshot.docs) {
+        const data = doc.data();
+        totalOrders += 1;
+        const status = normalizeStatus(data.status);
+        if (status === 'Placed' || status === 'Packed' || status === 'Out for Delivery') {
+          pendingOrders += 1;
+        } else if (status === 'Delivered') {
+          deliveredOrders += 1;
+        }
+        revenue += getRevenue(data);
+      }
+
+      await db.collection("system_stats").doc("order_analytics").set({
+        totalOrders,
+        pendingOrders,
+        deliveredOrders,
+        revenue,
+        lastRecalibratedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastRecalibratedBy: request.auth.uid,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      return { success: true, message: "Order analytics recalibrated successfully." };
+
+    } catch (error) {
+      console.error("Recalibration failed:", error);
+      throw new functions.https.HttpsError("internal", "Failed to recalibrate order analytics.");
+    }
+  }
+);

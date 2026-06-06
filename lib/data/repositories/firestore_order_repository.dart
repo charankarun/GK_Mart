@@ -422,30 +422,41 @@ class FirestoreOrderRepository implements OrderRepository {
           'Dashboard analytics initialization selectedDate='
           '${selectedDate.toIso8601String()}',
         );
-        _dashboardLog(
-          'Date filter query start=${selectedDate.toIso8601String()} '
-          'end=${nextDate.toIso8601String()} fields=$_dateFields',
-        );
-        _dashboardLog('Orders query start collection=orders');
 
-        final ordersSnapshot =
-            await _orders.get().timeout(AppDurations.dashboardTimeout);
-        _dashboardLog(
-            'Orders query result count=${ordersSnapshot.docs.length}');
+        // 1. Fetch lifetime totals from backend-authoritative stats (1 read)
+        final statsDoc = await _firestore.collection('system_stats').doc('order_analytics').get().timeout(AppDurations.dashboardTimeout);
+        final statsData = statsDoc.data() ?? {};
+        
+        final totalOrders = statsData['totalOrders'] as int? ?? 0;
+        final revenue = (statsData['revenue'] as num?)?.toDouble() ?? 0.0;
+        final pendingOrders = statsData['pendingOrders'] as int? ?? 0;
+        final deliveredOrders = statsData['deliveredOrders'] as int? ?? 0;
 
-        _dashboardLog('Revenue query start fields=$_revenueFields');
-        final analytics = _analyticsFromOrdersSnapshot(
-          ordersSnapshot,
+        // 2. Fetch single-day orders for date-range stats
+        // This completely avoids missing legacy data issues and composite index requirements.
+        final dateOrdersSnapshot = await _orders
+            .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(selectedDate))
+            .where('timestamp', isLessThan: Timestamp.fromDate(nextDate))
+            .get()
+            .timeout(AppDurations.dashboardTimeout);
+            
+        int selectedDateOrders = dateOrdersSnapshot.docs.length;
+        double selectedDateRevenue = 0.0;
+        
+        for (final doc in dateOrdersSnapshot.docs) {
+          final data = doc.data();
+          selectedDateRevenue += _readOrderRevenue(data);
+        }
+
+        return OrderAnalytics(
+          totalOrders: totalOrders,
+          revenue: revenue,
+          pendingOrders: pendingOrders,
+          deliveredOrders: deliveredOrders,
           selectedDate: selectedDate,
-          nextDate: nextDate,
+          selectedDateOrders: selectedDateOrders,
+          selectedDateRevenue: selectedDateRevenue,
         );
-        _dashboardLog(
-          'Revenue query result count=${ordersSnapshot.docs.length} '
-          'revenue=${analytics.revenue} '
-          'selectedDateRevenue=${analytics.selectedDateRevenue}',
-        );
-
-        return analytics;
       },
     );
   }
