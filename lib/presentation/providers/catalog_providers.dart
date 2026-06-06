@@ -228,7 +228,7 @@ class ProductIdsRequest {
   int get hashCode => Object.hashAll(ids);
 }
 
-final productsByIdsProvider = StreamProvider.family<List<Product>, ProductIdsRequest>((ref, request) {
-  return ref.watch(productRepositoryProvider).watchProductsByIds(request.ids);
+final productsByIdsProvider = FutureProvider.family<List<Product>, ProductIdsRequest>((ref, request) {
+  return ref.watch(productRepositoryProvider).fetchProductsByIds(request.ids);
 });
 

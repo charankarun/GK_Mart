@@ -11,11 +11,24 @@ import '../providers/commerce_providers.dart';
 import '../widgets/app_cached_network_image.dart';
 import 'checkout_screen.dart';
 
-class CartScreen extends ConsumerWidget {
+class CartScreen extends ConsumerStatefulWidget {
   const CartScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CartScreen> createState() => _CartScreenState();
+}
+
+class _CartScreenState extends ConsumerState<CartScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.invalidate(productsByIdsProvider);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final session = ref.watch(currentSessionProvider);
 
     if (session == null) {

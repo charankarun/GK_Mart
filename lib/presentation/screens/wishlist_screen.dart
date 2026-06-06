@@ -7,15 +7,29 @@ import '../../domain/entities/product.dart';
 import '../navigation/customer_navigation_scope.dart';
 import '../providers/auth_providers.dart';
 import '../providers/commerce_providers.dart';
+import '../providers/catalog_providers.dart';
 import '../providers/wishlist_provider.dart';
 import '../widgets/app_cached_network_image.dart';
 import '../widgets/app_state_widgets.dart';
 
-class WishlistScreen extends ConsumerWidget {
+class WishlistScreen extends ConsumerStatefulWidget {
   const WishlistScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<WishlistScreen> createState() => _WishlistScreenState();
+}
+
+class _WishlistScreenState extends ConsumerState<WishlistScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.invalidate(productsByIdsProvider);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final session = ref.watch(currentSessionProvider);
 
     if (session == null) {

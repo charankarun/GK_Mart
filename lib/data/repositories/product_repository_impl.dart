@@ -72,75 +72,33 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   @override
-  Stream<List<Product>> watchProductsByIds(List<String> productIds) {
+  Future<List<Product>> fetchProductsByIds(List<String> productIds) {
     final ids = _normalizeProductIds(productIds);
-    if (ids.isEmpty) return Stream.value(const <Product>[]);
+    if (ids.isEmpty) return Future.value(const <Product>[]);
 
-    return RepositoryGuard.watch(
+    return RepositoryGuard.run(
       message: 'Unable to load products.',
-      create: () {
+      action: () async {
         final idChunks = _chunks(ids, _whereInLimit).toList();
-        late StreamController<List<Product>> controller;
-        final chunkProducts = <int, Map<String, Product>>{};
-        final loadedChunks = <int>{};
-        final subscriptions =
-            <StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>[];
+        final fetchFutures = idChunks.map((chunk) {
+          return _products.where(FieldPath.documentId, whereIn: chunk).get();
+        });
 
-        void emitProductsIfReady() {
-          if (loadedChunks.length < idChunks.length || controller.isClosed) {
-            return;
+        final snapshots = await Future.wait(fetchFutures);
+        final productsById = <String, Product>{};
+
+        for (final snapshot in snapshots) {
+          for (final doc in snapshot.docs) {
+            productsById[doc.id] = ProductModel.fromFirestore(doc);
           }
-
-          final productsById = <String, Product>{};
-          for (final products in chunkProducts.values) {
-            productsById.addAll(products);
-          }
-
-          controller.add([
-            for (final id in ids)
-              if (productsById[id] != null) productsById[id]!,
-          ]);
         }
 
-        controller = StreamController<List<Product>>(
-          onListen: () {
-            final cachedProducts = [
-              for (final id in ids)
-                if (_productCache[id] != null) _productCache[id]!,
-            ];
-            if (cachedProducts.isNotEmpty) controller.add(cachedProducts);
+        _cacheProducts(productsById.values);
 
-            for (var index = 0; index < idChunks.length; index += 1) {
-              final chunkIndex = index;
-              final idChunk = idChunks[index];
-              final subscription = _products
-                  .where(FieldPath.documentId, whereIn: idChunk)
-                  .snapshots()
-                  .listen(
-                (snapshot) {
-                  final products = {
-                    for (final doc in snapshot.docs)
-                      doc.id: ProductModel.fromFirestore(doc),
-                  };
-                  chunkProducts[chunkIndex] = products;
-                  _cacheProducts(products.values);
-                  loadedChunks.add(chunkIndex);
-                  emitProductsIfReady();
-                },
-                onError: controller.addError,
-              );
-
-              subscriptions.add(subscription);
-            }
-          },
-          onCancel: () async {
-            for (final subscription in subscriptions) {
-              await subscription.cancel();
-            }
-          },
-        );
-
-        return controller.stream;
+        return [
+          for (final id in ids)
+            if (productsById[id] != null) productsById[id]!,
+        ];
       },
     );
   }

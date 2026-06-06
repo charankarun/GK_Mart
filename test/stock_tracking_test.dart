@@ -67,11 +67,11 @@ void main() {
           const AuthSession(uid: 'user-1'),
         ),
         cartRepositoryProvider.overrideWithValue(cartRepo),
-        productsByIdsProvider.overrideWith((ref, request) {
+        productsByIdsProvider.overrideWith((ref, request) async {
           if (request.ids.contains(product.id)) {
-            return Stream.value([product]);
+            return [product];
           }
-          return Stream.value([]);
+          return [];
         }),
       ],
     );

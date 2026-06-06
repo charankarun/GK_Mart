@@ -260,20 +260,7 @@ class FirestoreOrderRepository implements OrderRepository {
           }
         }
 
-        // 4. Fetch the last 200 orders to locally scan as candidates for product names / older format search
-        try {
-          final recentSnapshot = await _orders
-              .orderBy('timestamp', descending: descending)
-              .limit(200)
-              .get()
-              .timeout(AppDurations.networkTimeout);
-          for (final doc in recentSnapshot.docs) {
-            final order = _fromDocument(doc);
-            ordersById[order.id] = order;
-          }
-        } catch (e) {
-          developer.log('Failed to fetch recent orders for local search', error: e);
-        }
+        // Removed the last 200 orders fallback scan to prevent excessive reads
 
         // 5. Client-side filter across the four indices
         final queryLower = searchText.toLowerCase();
@@ -366,20 +353,7 @@ class FirestoreOrderRepository implements OrderRepository {
           }
         }
 
-        // 3. Fetch all orders for the date to scan locally
-        try {
-          final dateQuerySnapshot = await _orders
-              .where('timestamp', isGreaterThanOrEqualTo: startTimestamp)
-              .where('timestamp', isLessThan: endTimestamp)
-              .get()
-              .timeout(AppDurations.networkTimeout);
-          for (final doc in dateQuerySnapshot.docs) {
-            final order = _fromDocument(doc);
-            ordersById[order.id] = order;
-          }
-        } catch (e) {
-          developer.log('Failed to fetch orders by date for local search', error: e);
-        }
+        // Removed the full date fetch fallback scan to prevent excessive reads
 
         // 4. Client-side filter across the four indices
         final queryLower = searchText.toLowerCase();
@@ -445,7 +419,7 @@ class FirestoreOrderRepository implements OrderRepository {
         
         for (final doc in dateOrdersSnapshot.docs) {
           final data = doc.data();
-          selectedDateRevenue += _readOrderRevenue(data);
+          selectedDateRevenue += _readOrderRevenue(data) ?? 0.0;
         }
 
         return OrderAnalytics(

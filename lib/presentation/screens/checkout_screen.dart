@@ -194,7 +194,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     // Double check stock levels before placing the order
     try {
       final productIds = cartItems.map((item) => item.productId).toList();
-      final latestProducts = await ref.read(productRepositoryProvider).watchProductsByIds(productIds).first;
+      final latestProducts = await ref.read(productRepositoryProvider).fetchProductsByIds(productIds);
       for (final cartItem in cartItems) {
         final idx = latestProducts.indexWhere((p) => p.id == cartItem.productId);
         if (idx != -1) {
