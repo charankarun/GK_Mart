@@ -313,7 +313,6 @@ class ProductRepositoryImpl implements ProductRepository {
         await _products
             .add(model.toFirestore(includeCreatedAt: true))
             .timeout(AppDurations.networkTimeout);
-        await _recalculateAndSaveStats();
       },
     );
   }
@@ -339,7 +338,6 @@ class ProductRepositoryImpl implements ProductRepository {
               SetOptions(merge: true),
             )
             .timeout(AppDurations.networkTimeout);
-        await _recalculateAndSaveStats();
       },
     );
   }
@@ -361,7 +359,6 @@ class ProductRepositoryImpl implements ProductRepository {
           ProductField.isAvailable: isAvailable,
           ProductField.updatedAt: FieldValue.serverTimestamp(),
         }).timeout(AppDurations.networkTimeout);
-        await _recalculateAndSaveStats();
       },
     );
   }
@@ -391,7 +388,6 @@ class ProductRepositoryImpl implements ProductRepository {
           ProductField.isAvailable: stockQuantity > 0,
           ProductField.updatedAt: FieldValue.serverTimestamp(),
         }).timeout(AppDurations.networkTimeout);
-        await _recalculateAndSaveStats();
       },
     );
   }
@@ -451,7 +447,6 @@ class ProductRepositoryImpl implements ProductRepository {
         await _products.doc(normalizedProductId).delete().timeout(
               AppDurations.networkTimeout,
             );
-        await _recalculateAndSaveStats();
       },
     );
   }
@@ -468,78 +463,28 @@ class ProductRepositoryImpl implements ProductRepository {
             .timeout(AppDurations.networkTimeout);
 
         if (!doc.exists) {
-          return await _recalculateAndSaveStats();
+          return const ProductStats(
+            totalProducts: 0,
+            availableProducts: 0,
+            outOfStockProducts: 0,
+            lowStockProducts: 0,
+            totalCategories: 0,
+          );
         }
 
-        final data = doc.data();
-        if (data == null ||
-            data['totalProducts'] == null ||
-            data['availableProducts'] == null ||
-            data['outOfStockProducts'] == null ||
-            data['lowStockProducts'] == null ||
-            data['totalCategories'] == null) {
-          return await _recalculateAndSaveStats();
-        }
-
+        final data = doc.data() ?? {};
         return ProductStats(
-          totalProducts: data['totalProducts'] as int,
-          availableProducts: data['availableProducts'] as int,
-          outOfStockProducts: data['outOfStockProducts'] as int,
-          lowStockProducts: data['lowStockProducts'] as int,
-          totalCategories: data['totalCategories'] as int,
+          totalProducts: data['totalProducts'] as int? ?? 0,
+          availableProducts: data['availableProducts'] as int? ?? 0,
+          outOfStockProducts: data['outOfStockProducts'] as int? ?? 0,
+          lowStockProducts: data['lowStockProducts'] as int? ?? 0,
+          totalCategories: data['totalCategories'] as int? ?? 0,
         );
       },
     );
   }
 
-  Future<ProductStats> _recalculateAndSaveStats() async {
-    final productsSnapshot = await _products.get().timeout(AppDurations.networkTimeout);
-    final products = productsSnapshot.docs.map(ProductModel.fromFirestore).toList();
 
-    var totalProducts = 0;
-    var availableProducts = 0;
-    var lowStockProducts = 0;
-
-    for (final product in products) {
-      totalProducts += 1;
-      if (product.isAvailable && !product.isStockEmpty) {
-        availableProducts += 1;
-      }
-      if (product.isLowStock) {
-        lowStockProducts += 1;
-      }
-    }
-
-    final outOfStockProducts = totalProducts - availableProducts;
-
-    final categoriesSnapshot = await _firestore
-        .collection(FirestoreCollections.categories)
-        .get()
-        .timeout(AppDurations.networkTimeout);
-    final totalCategories = categoriesSnapshot.docs.length;
-
-    final stats = ProductStats(
-      totalProducts: totalProducts,
-      availableProducts: availableProducts,
-      outOfStockProducts: outOfStockProducts,
-      lowStockProducts: lowStockProducts,
-      totalCategories: totalCategories,
-    );
-
-    await _firestore
-        .collection(FirestoreCollections.systemStats)
-        .doc(FirestoreDocuments.dashboardStats)
-        .set({
-          'totalProducts': stats.totalProducts,
-          'availableProducts': stats.availableProducts,
-          'outOfStockProducts': stats.outOfStockProducts,
-          'lowStockProducts': stats.lowStockProducts,
-          'totalCategories': stats.totalCategories,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }).timeout(AppDurations.networkTimeout);
-
-    return stats;
-  }
 
   Future<Query<Map<String, dynamic>>> _startAfterProductCursor({
     required Query<Map<String, dynamic>> query,

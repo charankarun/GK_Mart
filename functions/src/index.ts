@@ -353,6 +353,349 @@ export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
     
     console.log(`Successfully processed deletion for user ${uid}. Anonymized ${ordersSnapshot.size} orders.`);
   } catch (error) {
-    console.error(`Error processing deletion for user ${uid}:`, error);
+      console.error(`Error processing deletion for user ${uid}:`, error);
+    }
+  }
+);
+
+export const processProductWrite = functions.firestore.onDocumentWritten(
+  "products/{productId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+
+    let totalDelta = 0;
+    let availableDelta = 0;
+    let lowStockDelta = 0;
+
+    const evaluate = (data: any | undefined) => {
+      if (!data) return { exists: false, available: false, lowStock: false };
+      
+      const isAvailable = data.isAvailable === true;
+      const trackStock = data.trackStock === true;
+      const stockQuantity = typeof data.stockQuantity === 'number' ? data.stockQuantity : null;
+      const lowStockThreshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 5;
+
+      const isStockEmpty = trackStock && stockQuantity !== null && stockQuantity <= 0;
+      const isLowStock = trackStock && stockQuantity !== null && stockQuantity > 0 && stockQuantity <= lowStockThreshold;
+      const available = isAvailable && !isStockEmpty;
+
+      return { exists: true, available, lowStock: isLowStock };
+    };
+
+    const b = evaluate(before);
+    const a = evaluate(after);
+
+    if (!b.exists && a.exists) totalDelta += 1;
+    if (b.exists && !a.exists) totalDelta -= 1;
+
+    if (!b.available && a.available) availableDelta += 1;
+    if (b.available && !a.available) availableDelta -= 1;
+
+    if (!b.lowStock && a.lowStock) lowStockDelta += 1;
+    if (b.lowStock && !a.lowStock) lowStockDelta -= 1;
+
+    const outOfStockDelta = totalDelta - availableDelta;
+
+    if (totalDelta === 0 && availableDelta === 0 && outOfStockDelta === 0 && lowStockDelta === 0) {
+      return;
+    }
+
+    const updates: any = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (totalDelta !== 0) updates.totalProducts = admin.firestore.FieldValue.increment(totalDelta);
+    if (availableDelta !== 0) updates.availableProducts = admin.firestore.FieldValue.increment(availableDelta);
+        // 3. Update order status to Cancelled
+        transaction.update(orderRef, {
+          status: "Cancelled",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      });
+    } catch (error: any) {
+      console.error("Cancellation failed", error);
+    }
+  }
+);
+
+export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
+  "orders/{orderId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    
+    if (!before || !after) return;
+    
+    if (before.status === after.status) return;
+
+    // Ignore transitions handled explicitly elsewhere (like cancellation requests starting up)
+    if (after.status === "Cancellation_Requested" || after.status === "Pending") return;
+
+    const status = after.status;
+    const orderId = event.params.orderId;
+    const targetUserId = after.userId;
+
+    const normalizedStatus = status.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const eventId = event.id || Date.now().toString();
+
+    try {
+      const notifRef = db.collection("notifications").doc(`customer_status_${orderId}_${normalizedStatus}_${eventId}`);
+      await notifRef.set({
+        type: "order_status",
+        eventType: "order_status",
+        targetUserId: targetUserId,
+        targetRole: "",
+        sourceUserId: "",
+        sourceInstanceId: "backend",
+        orderId: orderId,
+        status: normalizedStatus,
+        title: `Order ${status}`,
+        body: `Your order is now ${status}.`,
+        amount: "",
+        customerName: after.userName || after.customerName || "",
+        phone: after.phone || "",
+        date: new Date().toISOString(),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        isRead: false
+      });
+    } catch (error) {
+      console.error("Non-critical failure: Could not create status notification.", error);
+    }
+  }
+);
+
+export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) => {
+  const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
+  
+  try {
+    const snapshot = await db.collection("orders")
+      .where("status", "==", "Pending")
+      .where("timestamp", "<", admin.firestore.Timestamp.fromDate(fifteenMinsAgo))
+      .get();
+
+    if (snapshot.empty) {
+      console.log("No stuck pending orders found.");
+      return;
+    }
+
+    let batch = db.batch();
+    let count = 0;
+
+    for (const doc of snapshot.docs) {
+      batch.update(doc.ref, {
+        status: "Failed",
+        failureReason: "Transaction Timeout (Order stuck in Pending)",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      count++;
+
+      if (count === 500) {
+        await batch.commit();
+        batch = db.batch();
+        count = 0;
+      }
+    }
+
+    if (count > 0) {
+      await batch.commit();
+    }
+    
+    console.log(`Cleaned up ${snapshot.size} stuck pending orders.`);
+  } catch (error) {
+    console.error("Error cleaning up stuck pending orders:", error);
   }
 });
+
+export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
+  const uid = user.uid;
+  
+  try {
+    let batch = db.batch();
+    let count = 0;
+
+    // 1. Delete user documents
+    batch.delete(db.collection("users").doc(uid));
+    batch.delete(db.collection("carts").doc(uid));
+    batch.delete(db.collection("wishlist").doc(uid));
+    count += 3;
+
+    // 2. Anonymize Orders
+    const ordersSnapshot = await db.collection("orders").where("userId", "==", uid).get();
+    
+    for (const doc of ordersSnapshot.docs) {
+      batch.update(doc.ref, {
+        userName: "Deleted User",
+        customerName: "Deleted User",
+        phone: "Redacted",
+        address: "Redacted",
+        email: "Redacted",
+        searchTokens: [],
+        userDeleted: true,
+        deletedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      count++;
+      
+      // Handle Firestore 500 operation limit per batch
+      if (count === 500) {
+        await batch.commit();
+        batch = db.batch();
+        count = 0;
+      }
+    }
+
+    // Commit any remaining operations
+    if (count > 0) {
+      await batch.commit();
+    }
+    
+    console.log(`Successfully processed deletion for user ${uid}. Anonymized ${ordersSnapshot.size} orders.`);
+  } catch (error) {
+      console.error(`Error processing deletion for user ${uid}:`, error);
+    }
+});
+
+export const processProductWrite = functions.firestore.onDocumentWritten(
+  "products/{productId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+
+    let totalDelta = 0;
+    let availableDelta = 0;
+    let lowStockDelta = 0;
+
+    const evaluate = (data: any | undefined) => {
+      if (!data) return { exists: false, available: false, lowStock: false };
+      
+      const isAvailable = data.isAvailable === true;
+      const trackStock = data.trackStock === true;
+      const stockQuantity = typeof data.stockQuantity === 'number' ? data.stockQuantity : null;
+      const lowStockThreshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 5;
+
+      const isStockEmpty = trackStock && stockQuantity !== null && stockQuantity <= 0;
+      const isLowStock = trackStock && stockQuantity !== null && stockQuantity > 0 && stockQuantity <= lowStockThreshold;
+      const available = isAvailable && !isStockEmpty;
+
+      return { exists: true, available, lowStock: isLowStock };
+    };
+
+    const b = evaluate(before);
+    const a = evaluate(after);
+
+    if (!b.exists && a.exists) totalDelta += 1;
+    if (b.exists && !a.exists) totalDelta -= 1;
+
+    if (!b.available && a.available) availableDelta += 1;
+    if (b.available && !a.available) availableDelta -= 1;
+
+    if (!b.lowStock && a.lowStock) lowStockDelta += 1;
+    if (b.lowStock && !a.lowStock) lowStockDelta -= 1;
+
+    const outOfStockDelta = totalDelta - availableDelta;
+
+    if (totalDelta === 0 && availableDelta === 0 && outOfStockDelta === 0 && lowStockDelta === 0) {
+      return;
+    }
+
+    const updates: any = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (totalDelta !== 0) updates.totalProducts = admin.firestore.FieldValue.increment(totalDelta);
+    if (availableDelta !== 0) updates.availableProducts = admin.firestore.FieldValue.increment(availableDelta);
+    if (outOfStockDelta !== 0) updates.outOfStockProducts = admin.firestore.FieldValue.increment(outOfStockDelta);
+    if (lowStockDelta !== 0) updates.lowStockProducts = admin.firestore.FieldValue.increment(lowStockDelta);
+
+    try {
+      await db.collection("system_stats").doc("dashboard_stats").set(updates, { merge: true });
+    } catch (error) {
+      console.error("Failed to update product stats:", error);
+    }
+  }
+);
+
+export const processCategoryWrite = functions.firestore.onDocumentWritten(
+  "categories/{categoryId}",
+  async (event) => {
+    const beforeExists = event.data?.before.exists ?? false;
+    const afterExists = event.data?.after.exists ?? false;
+
+    let delta = 0;
+    if (!beforeExists && afterExists) delta = 1;
+    if (beforeExists && !afterExists) delta = -1;
+
+    if (delta === 0) return;
+
+    try {
+      await db.collection("system_stats").doc("dashboard_stats").set({
+        totalCategories: admin.firestore.FieldValue.increment(delta),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    } catch (error) {
+      console.error("Failed to update category stats:", error);
+    }
+  }
+);
+
+export const recalibrateInventoryStats = functions.https.onCall(
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Must be authenticated."
+      );
+    }
+    
+    const userDoc = await db.collection("users").doc(request.auth.uid).get();
+    const role = userDoc.data()?.role?.toString().trim().toLowerCase();
+    if (!userDoc.exists || (role !== "admin" && role !== "owner")) {
+       throw new functions.https.HttpsError(
+         "permission-denied",
+         "Must be an admin or owner to recalibrate stats."
+       );
+    }
+
+    try {
+      const categoriesSnapshot = await db.collection("categories").count().get();
+      const totalCategories = categoriesSnapshot.data().count;
+
+      const productsSnapshot = await db.collection("products").get();
+      
+      let totalProducts = 0;
+      let availableProducts = 0;
+      let outOfStockProducts = 0;
+      let lowStockProducts = 0;
+
+      for (const doc of productsSnapshot.docs) {
+        const data = doc.data();
+        totalProducts += 1;
+        
+        const isAvailable = data.isAvailable === true;
+        const trackStock = data.trackStock === true;
+        const stockQuantity = typeof data.stockQuantity === 'number' ? data.stockQuantity : null;
+        const lowStockThreshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 5;
+
+        const isStockEmpty = trackStock && stockQuantity !== null && stockQuantity <= 0;
+        const isLowStock = trackStock && stockQuantity !== null && stockQuantity > 0 && stockQuantity <= lowStockThreshold;
+        const available = isAvailable && !isStockEmpty;
+
+        if (available) availableProducts += 1;
+        if (isLowStock) lowStockProducts += 1;
+      }
+
+      const outOfStockProductsCalc = totalProducts - availableProducts;
+
+      await db.collection("system_stats").doc("dashboard_stats").set({
+        totalCategories,
+        totalProducts,
+        availableProducts,
+        outOfStockProducts: outOfStockProductsCalc,
+        lowStockProducts,
+        lastRecalibratedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastRecalibratedBy: request.auth.uid,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      return { success: true, message: "Inventory stats recalibrated successfully." };
+
+    } catch (error) {
+      console.error("Recalibration failed:", error);
+      throw new functions.https.HttpsError("internal", "Failed to recalibrate inventory stats.");
+    }
+  }
+);
