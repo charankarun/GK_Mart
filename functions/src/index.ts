@@ -478,7 +478,7 @@ export const recalibrateInventoryStats = functions.https.onCall(
       
       let totalProducts = 0;
       let availableProducts = 0;
-      let outOfStockProducts = 0;
+      // let outOfStockProducts = 0; // unused
       let lowStockProducts = 0;
 
       for (const doc of productsSnapshot.docs) {
@@ -733,6 +733,7 @@ export const processAuthoritativeAnalytics = functions.firestore.onDocumentUpdat
       return 0.0;
     };
 
+    const revenue = getRevenue(after);
     try {
       await db.runTransaction(async (transaction) => {
         const ledgerDoc = await transaction.get(ledgerRef);
@@ -740,8 +741,6 @@ export const processAuthoritativeAnalytics = functions.firestore.onDocumentUpdat
           logger.warn("processAuthoritativeAnalytics: duplicate event skipped (idempotency lock active)", { functionName: "processAuthoritativeAnalytics", orderId, eventType: "Pending->Placed", operation: "analytics_increment" });
           return;
         }
-
-        const revenue = getRevenue(after);
 
         transaction.set(ledgerRef, {
           orderId: orderId,

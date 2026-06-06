@@ -99,6 +99,7 @@ service cloud.firestore {
         && (
           orderId.matches('^SLV-[0-9]{8}-[A-Z0-9]{4}$')
           || orderId.matches('^GK[0-9]{5,}$')
+          || orderId.matches('^[a-zA-Z0-9]{20}$')
         );
     }
 
