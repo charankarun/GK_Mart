@@ -12,6 +12,7 @@ import '../../core/utils/phone_number_normalizer.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/cart_pricing.dart';
 import '../../domain/entities/order.dart';
+import '../../services/analytics_service.dart';
 import '../providers/auth_providers.dart';
 import '../providers/commerce_providers.dart';
 import '../providers/order_providers.dart';
@@ -34,6 +35,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   final addressController = TextEditingController();
   final pincodeController = TextEditingController();
   bool hasSeededProfile = false;
+  bool hasLoggedBeginCheckout = false;
 
   @override
   void dispose() {
@@ -73,6 +75,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final pricing = ref.watch(cartPricingSummaryProvider);
     final orderCreationState = ref.watch(orderCreationControllerProvider);
     final isLoading = orderCreationState.isLoading;
+
+    if (!hasLoggedBeginCheckout && cartItems.isNotEmpty) {
+      hasLoggedBeginCheckout = true;
+      ref.read(analyticsServiceProvider).logBeginCheckout(
+        value: pricing.finalPayable,
+        totalItems: cartItems.length,
+      );
+    }
 
     final storeConfig = ref.watch(storeConfigProvider).maybeWhen(
           data: (config) => config,
@@ -247,6 +257,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
     try {
       _logCheckoutOrder('_placeOrder: calling createOrder...');
+      ref.read(analyticsServiceProvider).logPurchaseAttempt(
+        orderId: 'attempt_${DateTime.now().millisecondsSinceEpoch}',
+        value: pricing.finalPayable,
+      );
       final orderId =
           await ref.read(orderCreationControllerProvider.notifier).createOrder(
                 request,

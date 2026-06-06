@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../services/analytics_service.dart';
 import '../providers/repository_providers.dart';
 
 class AuthScreen extends ConsumerStatefulWidget {
@@ -140,6 +141,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
             smsCode: otp,
             fallbackPhone: _e164Phone,
           );
+      await ref.read(analyticsServiceProvider).logLogin('phone');
     } catch (error) {
       if (!mounted) return;
       _showMessage(_getFriendlyErrorMessage(error));

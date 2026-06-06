@@ -9,6 +9,7 @@ import '../../domain/entities/auth_session.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/cart_pricing.dart';
 import '../../domain/entities/product.dart';
+import '../../services/analytics_service.dart';
 import 'auth_providers.dart';
 import 'catalog_providers.dart';
 import 'repository_providers.dart';
@@ -86,6 +87,12 @@ class CartController extends StateNotifier<List<CartItem>> {
         ...state,
         CartItem.fromProduct(product),
       ];
+      _ref.read(analyticsServiceProvider).logAddToCart(
+        itemId: product.id,
+        itemName: product.name,
+        price: product.price,
+        quantity: 1,
+      );
       _persistAddProduct(product, previousState);
       return;
     }
@@ -106,6 +113,12 @@ class CartController extends StateNotifier<List<CartItem>> {
       quantity: existingItem.quantity + 1,
     );
     state = nextItems;
+    _ref.read(analyticsServiceProvider).logAddToCart(
+      itemId: product.id,
+      itemName: product.name,
+      price: product.price,
+      quantity: 1,
+    );
     _persistAddProduct(product, previousState);
   }
 
@@ -150,6 +163,12 @@ class CartController extends StateNotifier<List<CartItem>> {
         else
           item,
     ];
+    _ref.read(analyticsServiceProvider).logAddToCart(
+      itemId: existingItem.productId,
+      itemName: existingItem.name,
+      price: existingItem.price,
+      quantity: 1,
+    );
     _persist(
       action: () {
         final userId = _requireUserId();
@@ -174,6 +193,13 @@ class CartController extends StateNotifier<List<CartItem>> {
     ];
     if (existingItem == null) return;
 
+    _ref.read(analyticsServiceProvider).logRemoveFromCart(
+      itemId: existingItem.productId,
+      itemName: existingItem.name,
+      price: existingItem.price,
+      quantity: 1,
+    );
+
     _persist(
       action: () {
         final userId = _requireUserId();
@@ -188,10 +214,19 @@ class CartController extends StateNotifier<List<CartItem>> {
 
   void remove(String productId) {
     final previousState = state;
+    final existingItem = _itemById(productId);
     state = [
       for (final item in state)
         if (item.productId != productId) item,
     ];
+    if (existingItem != null) {
+      _ref.read(analyticsServiceProvider).logRemoveFromCart(
+        itemId: existingItem.productId,
+        itemName: existingItem.name,
+        price: existingItem.price,
+        quantity: existingItem.quantity,
+      );
+    }
     _persist(
       action: () {
         final userId = _requireUserId();
