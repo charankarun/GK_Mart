@@ -1,4 +1,5 @@
 import * as functions from "firebase-functions/v2";
+import { logger } from "firebase-functions/v2";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as v1 from "firebase-functions/v1";
 import * as admin from "firebase-admin";
@@ -13,6 +14,8 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
     
     const order = orderDoc.data();
     if (order.status !== "Pending") return;
+
+    logger.info("processPendingOrder: started", { functionName: "processPendingOrder", orderId: event.params.orderId, userId: order.userId, itemCount: (order.items || []).length });
 
     try {
       const generatedOrderId = await db.runTransaction(async (transaction) => {
@@ -88,6 +91,8 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         return officialOrderId;
       });
 
+      logger.info("processPendingOrder: order placed successfully", { functionName: "processPendingOrder", orderId: event.params.orderId, officialOrderId: generatedOrderId, userId: order.userId, operation: "stock_deducted_order_placed" });
+
       // Secondary Block (Post-Commit) - Notifications
       try {
         const batch = db.batch();
@@ -143,9 +148,10 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
 
         await batch.commit();
       } catch (error) {
-        console.error("Non-critical failure: Could not create notifications.", error);
+        logger.warn("processPendingOrder: notification dispatch failed (non-critical)", { functionName: "processPendingOrder", orderId: event.params.orderId, officialOrderId: generatedOrderId, operation: "notification_dispatch", error: (error as any)?.message });
       }
     } catch (error: any) {
+      logger.error("processPendingOrder: transaction failed", { functionName: "processPendingOrder", orderId: event.params.orderId, userId: order.userId, operation: "place_order_transaction", status: "Failed", error: error?.message });
       // Transaction failed
       await db.collection("orders").doc(event.params.orderId).update({
         status: "Failed",
@@ -163,7 +169,9 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
     const after = event.data?.after.data();
     
     if (!before || !after) return;
-    
+
+    logger.info("processOrderCancellation: started", { functionName: "processOrderCancellation", orderId: event.params.orderId, beforeStatus: before.status, afterStatus: after.status, eventType: "cancellation" });
+
     // Only process when status changes to Cancelled or Cancellation_Requested for the FIRST time
     // If it was already cancelled or requested, do not restore stock again (prevent duplicate restorations)
     if (before.status === "Cancelled" || before.status === "Cancellation_Requested") {
@@ -215,8 +223,9 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
       });
+      logger.info("processOrderCancellation: stock restored and order cancelled", { functionName: "processOrderCancellation", orderId: event.params.orderId, itemCount: (after.items || []).length, operation: "stock_restore_cancel" });
     } catch (error: any) {
-      console.error("Cancellation failed", error);
+      logger.error("processOrderCancellation: transaction failed", { functionName: "processOrderCancellation", orderId: event.params.orderId, beforeStatus: before.status, afterStatus: after.status, operation: "cancellation_transaction", error: error?.message });
     }
   }
 );
@@ -241,6 +250,8 @@ export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
     const normalizedStatus = status.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     const eventId = event.id || Date.now().toString();
 
+    logger.info("processOrderStatusUpdate: dispatching notification", { functionName: "processOrderStatusUpdate", orderId, status, eventType: `status_${normalizedStatus}`, targetUserId });
+
     try {
       const notifRef = db.collection("notifications").doc(`customer_status_${orderId}_${normalizedStatus}_${eventId}`);
       await notifRef.set({
@@ -261,8 +272,9 @@ export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         isRead: false
       });
+      logger.info("processOrderStatusUpdate: status notification dispatched", { functionName: "processOrderStatusUpdate", orderId, status, eventType: `status_${normalizedStatus}`, targetUserId, operation: "notification_dispatch" });
     } catch (error) {
-      console.error("Non-critical failure: Could not create status notification.", error);
+      logger.warn("processOrderStatusUpdate: notification dispatch failed (non-critical)", { functionName: "processOrderStatusUpdate", orderId, status, targetUserId, operation: "notification_dispatch", error: (error as any)?.message });
     }
   }
 );
@@ -277,7 +289,7 @@ export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) =
       .get();
 
     if (snapshot.empty) {
-      console.log("No stuck pending orders found.");
+      logger.info("cleanupStuckOrders: no stuck orders found", { functionName: "cleanupStuckOrders", operation: "scheduled_cleanup" });
       return;
     }
 
@@ -303,9 +315,9 @@ export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) =
       await batch.commit();
     }
     
-    console.log(`Cleaned up ${snapshot.size} stuck pending orders.`);
+    logger.info("cleanupStuckOrders: cleanup completed", { functionName: "cleanupStuckOrders", operation: "scheduled_cleanup", ordersFailedCount: snapshot.size });
   } catch (error) {
-    console.error("Error cleaning up stuck pending orders:", error);
+    logger.error("cleanupStuckOrders: cleanup failed", { functionName: "cleanupStuckOrders", operation: "scheduled_cleanup", error: (error as any)?.message });
   }
 });
 
@@ -351,206 +363,14 @@ export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
       await batch.commit();
     }
     
-    console.log(`Successfully processed deletion for user ${uid}. Anonymized ${ordersSnapshot.size} orders.`);
+    logger.info("processUserDeletion: completed", { functionName: "processUserDeletion", uid, operation: "user_data_deletion", ordersAnonymized: ordersSnapshot.size });
   } catch (error) {
-      console.error(`Error processing deletion for user ${uid}:`, error);
+      logger.error("processUserDeletion: failed", { functionName: "processUserDeletion", uid, operation: "user_data_deletion", error: (error as any)?.message });
     }
   }
 );
 
-export const processProductWrite = functions.firestore.onDocumentWritten(
-  "products/{productId}",
-  async (event) => {
-    const before = event.data?.before.data();
-    const after = event.data?.after.data();
 
-    let totalDelta = 0;
-    let availableDelta = 0;
-    let lowStockDelta = 0;
-
-    const evaluate = (data: any | undefined) => {
-      if (!data) return { exists: false, available: false, lowStock: false };
-      
-      const isAvailable = data.isAvailable === true;
-      const trackStock = data.trackStock === true;
-      const stockQuantity = typeof data.stockQuantity === 'number' ? data.stockQuantity : null;
-      const lowStockThreshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 5;
-
-      const isStockEmpty = trackStock && stockQuantity !== null && stockQuantity <= 0;
-      const isLowStock = trackStock && stockQuantity !== null && stockQuantity > 0 && stockQuantity <= lowStockThreshold;
-      const available = isAvailable && !isStockEmpty;
-
-      return { exists: true, available, lowStock: isLowStock };
-    };
-
-    const b = evaluate(before);
-    const a = evaluate(after);
-
-    if (!b.exists && a.exists) totalDelta += 1;
-    if (b.exists && !a.exists) totalDelta -= 1;
-
-    if (!b.available && a.available) availableDelta += 1;
-    if (b.available && !a.available) availableDelta -= 1;
-
-    if (!b.lowStock && a.lowStock) lowStockDelta += 1;
-    if (b.lowStock && !a.lowStock) lowStockDelta -= 1;
-
-    const outOfStockDelta = totalDelta - availableDelta;
-
-    if (totalDelta === 0 && availableDelta === 0 && outOfStockDelta === 0 && lowStockDelta === 0) {
-      return;
-    }
-
-    const updates: any = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-    if (totalDelta !== 0) updates.totalProducts = admin.firestore.FieldValue.increment(totalDelta);
-    if (availableDelta !== 0) updates.availableProducts = admin.firestore.FieldValue.increment(availableDelta);
-        // 3. Update order status to Cancelled
-        transaction.update(orderRef, {
-          status: "Cancelled",
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-      });
-    } catch (error: any) {
-      console.error("Cancellation failed", error);
-    }
-  }
-);
-
-export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
-  "orders/{orderId}",
-  async (event) => {
-    const before = event.data?.before.data();
-    const after = event.data?.after.data();
-    
-    if (!before || !after) return;
-    
-    if (before.status === after.status) return;
-
-    // Ignore transitions handled explicitly elsewhere (like cancellation requests starting up)
-    if (after.status === "Cancellation_Requested" || after.status === "Pending") return;
-
-    const status = after.status;
-    const orderId = event.params.orderId;
-    const targetUserId = after.userId;
-
-    const normalizedStatus = status.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-    const eventId = event.id || Date.now().toString();
-
-    try {
-      const notifRef = db.collection("notifications").doc(`customer_status_${orderId}_${normalizedStatus}_${eventId}`);
-      await notifRef.set({
-        type: "order_status",
-        eventType: "order_status",
-        targetUserId: targetUserId,
-        targetRole: "",
-        sourceUserId: "",
-        sourceInstanceId: "backend",
-        orderId: orderId,
-        status: normalizedStatus,
-        title: `Order ${status}`,
-        body: `Your order is now ${status}.`,
-        amount: "",
-        customerName: after.userName || after.customerName || "",
-        phone: after.phone || "",
-        date: new Date().toISOString(),
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        isRead: false
-      });
-    } catch (error) {
-      console.error("Non-critical failure: Could not create status notification.", error);
-    }
-  }
-);
-
-export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) => {
-  const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
-  
-  try {
-    const snapshot = await db.collection("orders")
-      .where("status", "==", "Pending")
-      .where("timestamp", "<", admin.firestore.Timestamp.fromDate(fifteenMinsAgo))
-      .get();
-
-    if (snapshot.empty) {
-      console.log("No stuck pending orders found.");
-      return;
-    }
-
-    let batch = db.batch();
-    let count = 0;
-
-    for (const doc of snapshot.docs) {
-      batch.update(doc.ref, {
-        status: "Failed",
-        failureReason: "Transaction Timeout (Order stuck in Pending)",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-      count++;
-
-      if (count === 500) {
-        await batch.commit();
-        batch = db.batch();
-        count = 0;
-      }
-    }
-
-    if (count > 0) {
-      await batch.commit();
-    }
-    
-    console.log(`Cleaned up ${snapshot.size} stuck pending orders.`);
-  } catch (error) {
-    console.error("Error cleaning up stuck pending orders:", error);
-  }
-});
-
-export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
-  const uid = user.uid;
-  
-  try {
-    let batch = db.batch();
-    let count = 0;
-
-    // 1. Delete user documents
-    batch.delete(db.collection("users").doc(uid));
-    batch.delete(db.collection("carts").doc(uid));
-    batch.delete(db.collection("wishlist").doc(uid));
-    count += 3;
-
-    // 2. Anonymize Orders
-    const ordersSnapshot = await db.collection("orders").where("userId", "==", uid).get();
-    
-    for (const doc of ordersSnapshot.docs) {
-      batch.update(doc.ref, {
-        userName: "Deleted User",
-        customerName: "Deleted User",
-        phone: "Redacted",
-        address: "Redacted",
-        email: "Redacted",
-        searchTokens: [],
-        userDeleted: true,
-        deletedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-      count++;
-      
-      // Handle Firestore 500 operation limit per batch
-      if (count === 500) {
-        await batch.commit();
-        batch = db.batch();
-        count = 0;
-      }
-    }
-
-    // Commit any remaining operations
-    if (count > 0) {
-      await batch.commit();
-    }
-    
-    console.log(`Successfully processed deletion for user ${uid}. Anonymized ${ordersSnapshot.size} orders.`);
-  } catch (error) {
-      console.error(`Error processing deletion for user ${uid}:`, error);
-    }
-});
 
 export const processProductWrite = functions.firestore.onDocumentWritten(
   "products/{productId}",
@@ -604,7 +424,7 @@ export const processProductWrite = functions.firestore.onDocumentWritten(
     try {
       await db.collection("system_stats").doc("dashboard_stats").set(updates, { merge: true });
     } catch (error) {
-      console.error("Failed to update product stats:", error);
+      logger.error("processProductWrite: failed to update product stats", { functionName: "processProductWrite", productId: event.params.productId, operation: "stats_update", totalDelta, availableDelta, error: (error as any)?.message });
     }
   }
 );
@@ -627,7 +447,7 @@ export const processCategoryWrite = functions.firestore.onDocumentWritten(
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     } catch (error) {
-      console.error("Failed to update category stats:", error);
+      logger.error("processCategoryWrite: failed to update category stats", { functionName: "processCategoryWrite", categoryId: event.params.categoryId, operation: "stats_update", delta, error: (error as any)?.message });
     }
   }
 );
@@ -691,10 +511,11 @@ export const recalibrateInventoryStats = functions.https.onCall(
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
 
+      logger.info("recalibrateInventoryStats: completed", { functionName: "recalibrateInventoryStats", uid: request.auth.uid, operation: "inventory_recalibration", totalProducts, availableProducts, outOfStockProducts: outOfStockProductsCalc, lowStockProducts, totalCategories });
       return { success: true, message: "Inventory stats recalibrated successfully." };
 
     } catch (error) {
-      console.error("Recalibration failed:", error);
+      logger.error("recalibrateInventoryStats: failed", { functionName: "recalibrateInventoryStats", uid: request.auth.uid, operation: "inventory_recalibration", error: (error as any)?.message });
       throw new functions.https.HttpsError("internal", "Failed to recalibrate inventory stats.");
     }
   }
@@ -782,7 +603,7 @@ export const processOrderWrite = functions.firestore.onDocumentWritten(
     try {
       await db.collection("system_stats").doc("order_analytics").set(updates, { merge: true });
     } catch (error) {
-      console.error("Failed to update order analytics:", error);
+      logger.error("processOrderWrite: failed to update order analytics", { functionName: "processOrderWrite", orderId: event.params.orderId, operation: "stats_update", ordersDelta, pendingDelta, deliveredDelta, revenueDelta, error: (error as any)?.message });
     }
   }
 );
@@ -870,10 +691,11 @@ export const recalibrateOrderAnalytics = functions.https.onCall(
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
 
+      logger.info("recalibrateOrderAnalytics: completed", { functionName: "recalibrateOrderAnalytics", uid: request.auth.uid, operation: "order_recalibration", totalOrders, pendingOrders, deliveredOrders, revenue });
       return { success: true, message: "Order analytics recalibrated successfully." };
 
     } catch (error) {
-      console.error("Recalibration failed:", error);
+      logger.error("recalibrateOrderAnalytics: failed", { functionName: "recalibrateOrderAnalytics", uid: request.auth.uid, operation: "order_recalibration", error: (error as any)?.message });
       throw new functions.https.HttpsError("internal", "Failed to recalibrate order analytics.");
     }
   }
@@ -915,7 +737,7 @@ export const processAuthoritativeAnalytics = functions.firestore.onDocumentUpdat
       await db.runTransaction(async (transaction) => {
         const ledgerDoc = await transaction.get(ledgerRef);
         if (ledgerDoc.exists) {
-          console.log(`Order ${orderId} already counted in authoritative analytics.`);
+          logger.warn("processAuthoritativeAnalytics: duplicate event skipped (idempotency lock active)", { functionName: "processAuthoritativeAnalytics", orderId, eventType: "Pending->Placed", operation: "analytics_increment" });
           return;
         }
 
@@ -932,8 +754,9 @@ export const processAuthoritativeAnalytics = functions.firestore.onDocumentUpdat
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
       });
+      logger.info("processAuthoritativeAnalytics: purchase counted", { functionName: "processAuthoritativeAnalytics", orderId, eventType: "Pending->Placed", operation: "analytics_increment", revenue });
     } catch (error) {
-      console.error("Authoritative analytics transaction failed:", error);
+      logger.error("processAuthoritativeAnalytics: transaction failed", { functionName: "processAuthoritativeAnalytics", orderId, eventType: "Pending->Placed", operation: "analytics_increment", error: (error as any)?.message });
     }
   }
 );
