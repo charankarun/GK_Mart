@@ -267,7 +267,8 @@ class FirestoreOrderRepository implements OrderRepository {
         final filteredOrders = ordersById.values.where((order) {
           if (!_matchesStatus(order, normalizedStatus)) return false;
 
-          final idMatch = order.id.toLowerCase().contains(queryLower);
+          final idMatch = order.id.toLowerCase().contains(queryLower) ||
+              order.displayId.toLowerCase().contains(queryLower);
           final nameMatch = order.customerDisplayName.toLowerCase().contains(queryLower);
           final phoneMatch = order.phone.toLowerCase().contains(queryLower);
           final productMatch = order.items.any(
@@ -361,7 +362,8 @@ class FirestoreOrderRepository implements OrderRepository {
           if (!_matchesStatus(order, normalizedStatus)) return false;
           if (!_isOrderInDateRange(order, startDate, endDate)) return false;
 
-          final idMatch = order.id.toLowerCase().contains(queryLower);
+          final idMatch = order.id.toLowerCase().contains(queryLower) ||
+              order.displayId.toLowerCase().contains(queryLower);
           final nameMatch = order.customerDisplayName.toLowerCase().contains(queryLower);
           final phoneMatch = order.phone.toLowerCase().contains(queryLower);
           final productMatch = order.items.any(
@@ -790,6 +792,7 @@ class FirestoreOrderRepository implements OrderRepository {
 
     return Order(
       id: doc.id,
+      orderId: readString(data, 'orderId'),
       userId: readString(data, 'userId'),
       userName: readString(
         data,

@@ -638,7 +638,7 @@ class _AdminOrderCard extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: _OrderIdBlock(orderId: order.id)),
+                  Expanded(child: _OrderIdBlock(orderId: order.displayId)),
                   const SizedBox(width: 12),
                   _StatusChip(
                     label: effectiveStatus,

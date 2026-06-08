@@ -30,6 +30,7 @@ class OrderItem {
 class Order {
   const Order({
     required this.id,
+    this.orderId,
     required this.userId,
     required this.userName,
     required this.phone,
@@ -47,6 +48,7 @@ class Order {
   });
 
   final String id;
+  final String? orderId;
   final String userId;
   final String userName;
   final String phone;
@@ -61,6 +63,8 @@ class Order {
   final String status;
   final String paymentMethod;
   final DateTime? createdAt;
+
+  String get displayId => (orderId?.isNotEmpty == true) ? orderId! : id.toUpperCase();
 
   String get customerName => userName;
 

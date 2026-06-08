@@ -225,6 +225,73 @@ class UserOrderListController
 
   final Ref _ref;
   final String _userId;
+  final Map<String, StreamSubscription<Order?>> _pendingSubscriptions = {};
+
+  @override
+  set state(AsyncValue<OrderListState> value) {
+    super.state = value;
+    value.whenData((currentState) {
+      _updatePendingListeners(currentState.orders);
+    });
+  }
+
+  @override
+  void dispose() {
+    for (final sub in _pendingSubscriptions.values) {
+      sub.cancel();
+    }
+    _pendingSubscriptions.clear();
+    super.dispose();
+  }
+
+  void _updatePendingListeners(List<Order> orders) {
+    final pendingIds = orders
+        .where((o) => o.status == OrderStatus.pending)
+        .map((o) => o.id)
+        .toSet();
+
+    // Cancel subscriptions for orders that are no longer in the list or no longer pending
+    final toCancel = <String>[];
+    _pendingSubscriptions.forEach((orderId, sub) {
+      if (!pendingIds.contains(orderId)) {
+        toCancel.add(orderId);
+      }
+    });
+    for (final id in toCancel) {
+      _pendingSubscriptions[id]?.cancel();
+      _pendingSubscriptions.remove(id);
+    }
+
+    // Start watching any new pending orders
+    for (final orderId in pendingIds) {
+      if (!_pendingSubscriptions.containsKey(orderId)) {
+        _pendingSubscriptions[orderId] = _ref
+            .read(orderRepositoryProvider)
+            .watchOrder(orderId)
+            .listen((updatedOrder) {
+          if (updatedOrder == null) return;
+          if (updatedOrder.status != OrderStatus.pending || updatedOrder.orderId != null) {
+            // Update the state locally when the order transitions
+            _updateLocalOrderState(updatedOrder);
+            // Cancel subscription since it transitioned
+            _pendingSubscriptions[updatedOrder.id]?.cancel();
+            _pendingSubscriptions.remove(updatedOrder.id);
+          }
+        });
+      }
+    }
+  }
+
+  void _updateLocalOrderState(Order updatedOrder) {
+    final currentState = _currentState;
+    if (currentState == null) return;
+
+    final updatedList = currentState.orders.map((o) {
+      return o.id == updatedOrder.id ? updatedOrder : o;
+    }).toList();
+
+    state = AsyncData(currentState.copyWith(orders: updatedList));
+  }
 
   Future<void> loadInitial() async {
     state = const AsyncLoading();

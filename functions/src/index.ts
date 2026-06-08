@@ -1,6 +1,7 @@
 import * as functions from "firebase-functions/v2";
 import { logger } from "firebase-functions/v2";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as v1 from "firebase-functions/v1";
 import * as admin from "firebase-admin";
 admin.initializeApp();
@@ -11,7 +12,7 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
   async (event) => {
     const orderDoc = event.data;
     if (!orderDoc) return;
-    
+
     const order = orderDoc.data();
     if (order.status !== "Pending") return;
 
@@ -20,7 +21,7 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
     try {
       const generatedOrderId = await db.runTransaction(async (transaction) => {
         const orderRef = db.collection("orders").doc(event.params.orderId);
-        
+
         // 1. Read products
         const items = order.items || [];
         const productRefs = items.map((item: any) => db.collection("products").doc(item.productId));
@@ -62,7 +63,7 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
             if (trackStock) {
               const currentStock = productData?.stockQuantity || 0;
               const nextQuantity = currentStock - item.quantity;
-              
+
               const updateData: any = {
                 stockQuantity: admin.firestore.FieldValue.increment(-item.quantity),
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -82,12 +83,21 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         }, { merge: true });
 
         // 6. Update order status and official ID
+        const searchValues = [
+          officialOrderId,
+          order.userName || order.customerName || "",
+          order.phone || "",
+          ...(order.items || []).map((item: any) => item.name || "")
+        ].filter((val): val is string => typeof val === "string" && val.trim().length > 0);
+        const updatedTokens = generateOrderSearchTokens(searchValues);
+
         transaction.update(orderRef, {
           orderId: officialOrderId,
           status: "Placed",
+          searchTokens: updatedTokens,
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
-        
+
         return officialOrderId;
       });
 
@@ -97,7 +107,7 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
       try {
         const batch = db.batch();
         const dateStr = new Date().toISOString();
-        
+
         // Use deterministic IDs
         const custNotifRef = db.collection("notifications").doc(`customer_order_placed_${event.params.orderId}`);
         const adminNotifRef = db.collection("notifications").doc(`admin_new_order_${event.params.orderId}`);
@@ -167,7 +177,7 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
   async (event) => {
     const before = event.data?.before.data();
     const after = event.data?.after.data();
-    
+
     if (!before || !after) return;
 
     logger.info("processOrderCancellation: started", { functionName: "processOrderCancellation", orderId: event.params.orderId, beforeStatus: before.status, afterStatus: after.status, eventType: "cancellation" });
@@ -185,7 +195,7 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
     try {
       await db.runTransaction(async (transaction) => {
         const orderRef = db.collection("orders").doc(event.params.orderId);
-        
+
         // 1. Read products to restore stock
         const items = after.items || [];
         const productRefs = items.map((item: any) => db.collection("products").doc(item.productId));
@@ -204,7 +214,7 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
             if (trackStock) {
               const currentStock = productData?.stockQuantity || 0;
               const nextQuantity = currentStock + item.quantity;
-              
+
               const updateData: any = {
                 stockQuantity: admin.firestore.FieldValue.increment(item.quantity),
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -235,9 +245,9 @@ export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
   async (event) => {
     const before = event.data?.before.data();
     const after = event.data?.after.data();
-    
+
     if (!before || !after) return;
-    
+
     if (before.status === after.status) return;
 
     // Ignore transitions handled explicitly elsewhere (like cancellation requests starting up)
@@ -281,7 +291,7 @@ export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
 
 export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) => {
   const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
-  
+
   try {
     const snapshot = await db.collection("orders")
       .where("status", "==", "Pending")
@@ -314,7 +324,7 @@ export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) =
     if (count > 0) {
       await batch.commit();
     }
-    
+
     logger.info("cleanupStuckOrders: cleanup completed", { functionName: "cleanupStuckOrders", operation: "scheduled_cleanup", ordersFailedCount: snapshot.size });
   } catch (error) {
     logger.error("cleanupStuckOrders: cleanup failed", { functionName: "cleanupStuckOrders", operation: "scheduled_cleanup", error: (error as any)?.message });
@@ -323,7 +333,7 @@ export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) =
 
 export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
   const uid = user.uid;
-  
+
   try {
     let batch = db.batch();
     let count = 0;
@@ -336,7 +346,7 @@ export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
 
     // 2. Anonymize Orders
     const ordersSnapshot = await db.collection("orders").where("userId", "==", uid).get();
-    
+
     for (const doc of ordersSnapshot.docs) {
       batch.update(doc.ref, {
         userName: "Deleted User",
@@ -349,7 +359,7 @@ export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
         deletedAt: admin.firestore.FieldValue.serverTimestamp()
       });
       count++;
-      
+
       // Handle Firestore 500 operation limit per batch
       if (count === 500) {
         await batch.commit();
@@ -362,12 +372,12 @@ export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
     if (count > 0) {
       await batch.commit();
     }
-    
+
     logger.info("processUserDeletion: completed", { functionName: "processUserDeletion", uid, operation: "user_data_deletion", ordersAnonymized: ordersSnapshot.size });
   } catch (error) {
-      logger.error("processUserDeletion: failed", { functionName: "processUserDeletion", uid, operation: "user_data_deletion", error: (error as any)?.message });
-    }
+    logger.error("processUserDeletion: failed", { functionName: "processUserDeletion", uid, operation: "user_data_deletion", error: (error as any)?.message });
   }
+}
 );
 
 
@@ -384,7 +394,7 @@ export const processProductWrite = functions.firestore.onDocumentWritten(
 
     const evaluate = (data: any | undefined) => {
       if (!data) return { exists: false, available: false, lowStock: false };
-      
+
       const isAvailable = data.isAvailable === true;
       const trackStock = data.trackStock === true;
       const stockQuantity = typeof data.stockQuantity === 'number' ? data.stockQuantity : null;
@@ -452,22 +462,22 @@ export const processCategoryWrite = functions.firestore.onDocumentWritten(
   }
 );
 
-export const recalibrateInventoryStats = functions.https.onCall(
+export const recalibrateInventoryStats = onCall(
   async (request) => {
     if (!request.auth) {
-      throw new functions.https.HttpsError(
+      throw new HttpsError(
         "unauthenticated",
         "Must be authenticated."
       );
     }
-    
+
     const userDoc = await db.collection("users").doc(request.auth.uid).get();
     const role = userDoc.data()?.role?.toString().trim().toLowerCase();
     if (!userDoc.exists || (role !== "admin" && role !== "owner")) {
-       throw new functions.https.HttpsError(
-         "permission-denied",
-         "Must be an admin or owner to recalibrate stats."
-       );
+      throw new HttpsError(
+        "permission-denied",
+        "Must be an admin or owner to recalibrate stats."
+      );
     }
 
     try {
@@ -475,7 +485,7 @@ export const recalibrateInventoryStats = functions.https.onCall(
       const totalCategories = categoriesSnapshot.data().count;
 
       const productsSnapshot = await db.collection("products").get();
-      
+
       let totalProducts = 0;
       let availableProducts = 0;
       // let outOfStockProducts = 0; // unused
@@ -484,7 +494,7 @@ export const recalibrateInventoryStats = functions.https.onCall(
       for (const doc of productsSnapshot.docs) {
         const data = doc.data();
         totalProducts += 1;
-        
+
         const isAvailable = data.isAvailable === true;
         const trackStock = data.trackStock === true;
         const stockQuantity = typeof data.stockQuantity === 'number' ? data.stockQuantity : null;
@@ -608,22 +618,22 @@ export const processOrderWrite = functions.firestore.onDocumentWritten(
   }
 );
 
-export const recalibrateOrderAnalytics = functions.https.onCall(
+export const recalibrateOrderAnalytics = onCall(
   async (request) => {
     if (!request.auth) {
-      throw new functions.https.HttpsError(
+      throw new HttpsError(
         "unauthenticated",
         "Must be authenticated."
       );
     }
-    
+
     const userDoc = await db.collection("users").doc(request.auth.uid).get();
     const role = userDoc.data()?.role?.toString().trim().toLowerCase();
     if (!userDoc.exists || (role !== "admin" && role !== "owner")) {
-       throw new functions.https.HttpsError(
-         "permission-denied",
-         "Must be an admin or owner to recalibrate stats."
-       );
+      throw new HttpsError(
+        "permission-denied",
+        "Must be an admin or owner to recalibrate stats."
+      );
     }
 
     const normalizeStatus = (status: any) => {
@@ -668,7 +678,7 @@ export const recalibrateOrderAnalytics = functions.https.onCall(
       let revenue = 0.0;
 
       const ordersSnapshot = await db.collection("orders").get();
-      
+
       for (const doc of ordersSnapshot.docs) {
         const data = doc.data();
         totalOrders += 1;
@@ -759,3 +769,60 @@ export const processAuthoritativeAnalytics = functions.firestore.onDocumentUpdat
     }
   }
 );
+
+function generateOrderSearchTokens(values: string[]): string[] {
+  const tokens = new Set<string>();
+  const maxTokens = 120;
+
+  function addCoreTokens(value: string) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized.length === 0) return;
+    const compact = normalized.replace(/[^a-z0-9]/g, '');
+    if (normalized.length >= 2) tokens.add(normalized);
+    if (compact.length >= 2) tokens.add(compact);
+    const parts = normalized.split(/[^a-z0-9]+/);
+    for (const part of parts) {
+      if (part.length >= 2) tokens.add(part);
+    }
+  }
+
+  function addPrefixes(value: string) {
+    const maxLength = value.length > 20 ? 20 : value.length;
+    for (let length = 2; length <= maxLength; length++) {
+      tokens.add(value.substring(0, length));
+      if (tokens.size >= maxTokens) return;
+    }
+  }
+
+  function addSuffixes(value: string) {
+    const maxLength = value.length > 20 ? 20 : value.length;
+    for (let length = 2; length <= maxLength; length++) {
+      tokens.add(value.substring(value.length - length));
+      if (tokens.size >= maxTokens) return;
+    }
+  }
+
+  function addSubstrings(value: string) {
+    for (let start = 0; start < value.length; start++) {
+      for (let length = 2; length <= 8; length++) {
+        const end = start + length;
+        if (end > value.length) break;
+        tokens.add(value.substring(start, end));
+        if (tokens.size >= maxTokens) return;
+      }
+    }
+  }
+
+  for (const rawValue of values) {
+    addCoreTokens(rawValue);
+    const compact = rawValue.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (compact.length < 2) continue;
+    addPrefixes(compact);
+    addSuffixes(compact);
+    addSubstrings(compact);
+    if (tokens.size >= maxTokens) break;
+  }
+
+  return Array.from(tokens).slice(0, maxTokens);
+}
+

@@ -267,8 +267,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               );
       _logCheckoutOrder('Order created successfully orderId=$orderId.');
 
-      // Invalidate order list providers to ensure they refresh immediately
-      ref.invalidate(userOrderListProvider(userId));
+      // 1. Fetch your user ID from your session state
+      final uid = userId; // Adjust variable name based on your auth structure
+
+      // 2. Trigger a fresh async reload on the orders screen provider 
+      // This forces the app to pull the server-calculated official ID immediately
+      ref.invalidate(userOrderListProvider(uid));
+      await ref.read(userOrderListProvider(uid).notifier).loadInitial();
+
       ref.invalidate(adminOrderListProvider);
       ref.invalidate(dashboardRecentOrdersProvider);
 

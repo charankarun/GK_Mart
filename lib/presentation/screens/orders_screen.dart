@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -151,15 +152,51 @@ class _OrderCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: Text(
-                      'Order #${order.id.toUpperCase()}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.text,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
-                      ),
+                    child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      stream: FirebaseFirestore.instance
+                          .collection('orders')
+                          .doc(order.id)
+                          .snapshots(),
+                      builder: (context, snapshot) {
+                        final serverOrderId = snapshot.data?.data()?['orderId'] as String?;
+                        final isGKId = order.orderId != null && order.orderId!.startsWith('GK');
+
+                        if (serverOrderId == null && !isGKId) {
+                          return const Row(
+                            children: [
+                              Text(
+                                'Order #',
+                                style: TextStyle(
+                                  color: AppColors.text,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              SizedBox(width: 6),
+                              SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ],
+                          );
+                        }
+
+                        final displayVal = serverOrderId ?? order.displayId;
+                        return Text(
+                          'Order #$displayVal',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.text,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        );
+                      },
                     ),
                   ),
                   const SizedBox(width: 8),

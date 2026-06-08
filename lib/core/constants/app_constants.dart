@@ -51,7 +51,7 @@ class FirestoreDocuments {
 
   static const admins = 'admins';
   static const ordersCounter = 'orders';
-  static const dashboardStats = 'dashboard';
+  static const dashboardStats = 'dashboard_stats';
 }
 
 class FirestoreFields {

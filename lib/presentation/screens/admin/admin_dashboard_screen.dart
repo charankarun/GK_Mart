@@ -710,7 +710,7 @@ class _RecentOrderRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '#${_shortOrderId(order.id)}',
+                '#${_shortOrderId(order.displayId)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
