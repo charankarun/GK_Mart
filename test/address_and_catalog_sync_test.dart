@@ -191,6 +191,21 @@ class _FakeProductRepository implements ProductRepository {
   }
 
   @override
+  Stream<Product?> watchProduct(String productId) {
+    late StreamController<Product?> controller;
+    controller = StreamController<Product?>(
+      onListen: () {
+        final product = _products.cast<Product?>().firstWhere(
+          (p) => p?.id == productId,
+          orElse: () => null,
+        );
+        controller.add(product);
+      },
+    );
+    return controller.stream;
+  }
+
+  @override
   Future<List<Product>> fetchProductsByIds(List<String> productIds) async {
     return _products.where((p) => productIds.contains(p.id)).toList();
   }

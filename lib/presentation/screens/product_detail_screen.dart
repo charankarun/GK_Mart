@@ -8,6 +8,8 @@ import '../providers/auth_providers.dart';
 import '../providers/commerce_providers.dart';
 import '../widgets/app_cached_network_image.dart';
 
+import '../providers/catalog_providers.dart';
+
 class ProductDetailScreen extends ConsumerWidget {
   const ProductDetailScreen({
     super.key,
@@ -19,11 +21,18 @@ class ProductDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(currentSessionProvider);
-    final formattedQty = product.formattedQuantityUnit;
+
+    final realTimeProduct = ref.watch(productStreamProvider(product.id)).maybeWhen(
+          data: (p) => p,
+          orElse: () => null,
+        ) ??
+        product;
+
+    final formattedQty = realTimeProduct.formattedQuantityUnit;
 
     if (session == null) {
       return Scaffold(
-        appBar: AppBar(title: Text(product.name)),
+        appBar: AppBar(title: Text(realTimeProduct.name)),
         body: const Center(child: Text('Please login to add products')),
       );
     }
@@ -31,7 +40,7 @@ class ProductDetailScreen extends ConsumerWidget {
     final cartItems = ref.watch(cartItemsProvider);
     CartItem? cartItem;
     for (final item in cartItems) {
-      if (item.productId == product.id) {
+      if (item.productId == realTimeProduct.id) {
         cartItem = item;
         break;
       }
@@ -40,7 +49,7 @@ class ProductDetailScreen extends ConsumerWidget {
     final cartController = ref.read(cartControllerProvider.notifier);
 
     return Scaffold(
-      appBar: AppBar(title: Text(product.name)),
+      appBar: AppBar(title: Text(realTimeProduct.name)),
       body: Column(
         children: [
           Container(
@@ -48,7 +57,7 @@ class ProductDetailScreen extends ConsumerWidget {
             width: double.infinity,
             color: AppColors.softGreen,
             child: AppCachedNetworkImage(
-              imageUrl: product.imageUrl,
+              imageUrl: realTimeProduct.imageUrl,
               fit: BoxFit.cover,
               memCacheWidth: ProductDetailConfig.imageCacheWidth,
               maxWidthDiskCache: ProductDetailConfig.imageDiskCacheWidth,
@@ -65,7 +74,7 @@ class ProductDetailScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    product.name,
+                    realTimeProduct.name,
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -73,7 +82,7 @@ class ProductDetailScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '\u20B9${_formatPrice(product.sellingPrice)}',
+                    '\u20B9${_formatPrice(realTimeProduct.sellingPrice)}',
                     style: const TextStyle(
                       fontSize: 18,
                       color: AppColors.primary,
@@ -87,12 +96,10 @@ class ProductDetailScreen extends ConsumerWidget {
                       style: const TextStyle(color: Colors.grey),
                     ),
                   ],
-                  if (product.trackStock &&
-                      (product.stockQuantity ?? 0) <= 10 &&
-                      (product.stockQuantity ?? 0) > 0) ...[
+                  if (realTimeProduct.isLowStock) ...[
                     const SizedBox(height: 8),
                     Text(
-                      'Only ${product.stockQuantity} left!',
+                      'Only ${realTimeProduct.stockQuantity} left!',
                       style: const TextStyle(
                         fontSize: 16,
                         color: AppColors.danger,
@@ -112,7 +119,7 @@ class ProductDetailScreen extends ConsumerWidget {
                         IconButton(
                           icon: const Icon(Icons.remove),
                           onPressed: () {
-                            cartController.decrement(product.id);
+                            cartController.decrement(realTimeProduct.id);
                           },
                         ),
                         Text(
@@ -121,11 +128,11 @@ class ProductDetailScreen extends ConsumerWidget {
                         ),
                         IconButton(
                           icon: const Icon(Icons.add),
-                          onPressed: (product.trackStock &&
-                                  quantity >= (product.stockQuantity ?? 0))
+                          onPressed: (realTimeProduct.trackStock &&
+                                  quantity >= (realTimeProduct.stockQuantity ?? 0))
                               ? null
                               : () {
-                                  cartController.increment(product.id);
+                                  cartController.increment(realTimeProduct.id);
                                 },
                         ),
                       ],
@@ -142,19 +149,19 @@ class ProductDetailScreen extends ConsumerWidget {
                 backgroundColor: AppColors.primary,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              onPressed: (!product.isAvailable ||
-                      product.isStockEmpty ||
-                      (product.trackStock &&
-                          quantity >= (product.stockQuantity ?? 0)))
+              onPressed: (!realTimeProduct.isAvailable ||
+                      realTimeProduct.isStockEmpty ||
+                      (realTimeProduct.trackStock &&
+                          quantity >= (realTimeProduct.stockQuantity ?? 0)))
                   ? null
                   : () {
-                      cartController.addProduct(product);
+                      cartController.addProduct(realTimeProduct);
                     },
               child: Text(
-                (!product.isAvailable || product.isStockEmpty)
+                (!realTimeProduct.isAvailable || realTimeProduct.isStockEmpty)
                     ? 'Out of Stock'
-                    : (product.trackStock &&
-                            quantity >= (product.stockQuantity ?? 0))
+                    : (realTimeProduct.trackStock &&
+                            quantity >= (realTimeProduct.stockQuantity ?? 0))
                         ? 'Limit Reached'
                         : quantity == 0
                             ? 'Add to Cart'

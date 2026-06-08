@@ -6,6 +6,8 @@ import '../entities/product_stats.dart';
 abstract class ProductRepository {
   Stream<List<Product>> watchProducts({int limit = 40});
 
+  Stream<Product?> watchProduct(String productId);
+
   Future<List<Product>> fetchProductsByIds(List<String> productIds);
 
   Future<ProductPage> fetchProductsPage({

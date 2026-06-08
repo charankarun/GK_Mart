@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supermarket_app/core/theme/app_theme.dart';
 import 'package:supermarket_app/domain/entities/product.dart';
 import 'package:supermarket_app/presentation/widgets/product_card.dart';
@@ -29,22 +30,24 @@ void main() {
       );
 
       await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.light(),
-          home: Scaffold(
-            body: Center(
-              child: SizedBox(
-                width: width / 2 - 20, // simulate narrow grid column width
-                height: 250,
-                child: GkProductCard(
-                  product: product,
-                  quantity: 2,
-                  onTap: () {},
-                  onAdd: () {},
-                  onIncrement: () {},
-                  onDecrement: () {},
-                  isWishlisted: true,
-                  onToggleWishlist: () {},
+        ProviderScope(
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: Scaffold(
+              body: Center(
+                child: SizedBox(
+                  width: width / 2 - 20, // simulate narrow grid column width
+                  height: 250,
+                  child: GkProductCard(
+                    product: product,
+                    quantity: 2,
+                    onTap: () {},
+                    onAdd: () {},
+                    onIncrement: () {},
+                    onDecrement: () {},
+                    isWishlisted: true,
+                    onToggleWishlist: () {},
+                  ),
                 ),
               ),
             ),

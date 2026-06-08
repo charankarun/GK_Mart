@@ -4,7 +4,10 @@ import '../../core/theme/app_theme.dart';
 import '../../domain/entities/product.dart';
 import 'app_cached_network_image.dart';
 
-class GkProductCard extends StatelessWidget {
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/catalog_providers.dart';
+
+class GkProductCard extends ConsumerWidget {
   const GkProductCard({
     super.key,
     required this.product,
@@ -29,10 +32,16 @@ class GkProductCard extends StatelessWidget {
   final bool isWishlistUpdating;
 
   @override
-  Widget build(BuildContext context) {
-    final discountPercent = _discountPercent(product);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final realTimeProduct = ref.watch(productStreamProvider(product.id)).maybeWhen(
+          data: (p) => p,
+          orElse: () => null,
+        ) ??
+        product;
+
+    final discountPercent = _discountPercent(realTimeProduct);
     final hasDiscount = discountPercent > 0;
-    final formattedQty = product.formattedQuantityUnit;
+    final formattedQty = realTimeProduct.formattedQuantityUnit;
 
     return Material(
       color: AppColors.card,
@@ -58,7 +67,7 @@ class GkProductCard extends StatelessWidget {
             children: [
               Stack(
                 children: [
-                  _ProductImage(imageUrl: product.imageUrl),
+                  _ProductImage(imageUrl: realTimeProduct.imageUrl),
                   if (hasDiscount)
                     Positioned(
                       left: 8,
@@ -78,12 +87,12 @@ class GkProductCard extends StatelessWidget {
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        product.name,
+                        realTimeProduct.name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -93,7 +102,7 @@ class GkProductCard extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 2),
                       if (formattedQty.isNotEmpty) ...[
                         Text(
                           formattedQty,
@@ -105,13 +114,11 @@ class GkProductCard extends StatelessWidget {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 3),
+                        const SizedBox(height: 2),
                       ],
-                      if (product.trackStock &&
-                          (product.stockQuantity ?? 0) <= 10 &&
-                          (product.stockQuantity ?? 0) > 0) ...[
+                      if (realTimeProduct.isLowStock) ...[
                         Text(
-                          'Only ${product.stockQuantity} left!',
+                          'Only ${realTimeProduct.stockQuantity} left!',
                           style: const TextStyle(
                             color: AppColors.danger,
                             fontSize: 10,
@@ -124,13 +131,13 @@ class GkProductCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Expanded(
-                            child: _PriceCol(product: product),
+                            child: _PriceCol(product: realTimeProduct),
                           ),
                           _CartAction(
-                            isAvailable: product.isAvailable && !product.isStockEmpty,
+                            isAvailable: realTimeProduct.isAvailable && !realTimeProduct.isStockEmpty,
                             quantity: quantity,
                             onAdd: onAdd,
-                            onIncrement: (product.trackStock && quantity >= (product.stockQuantity ?? 0)) ? null : onIncrement,
+                            onIncrement: (realTimeProduct.trackStock && quantity >= (realTimeProduct.stockQuantity ?? 0)) ? null : onIncrement,
                             onDecrement: onDecrement,
                           ),
                         ],
@@ -155,7 +162,7 @@ class _ProductImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AspectRatio(
-      aspectRatio: 1.35,
+      aspectRatio: 1.45,
       child: Container(
         width: double.infinity,
         decoration: const BoxDecoration(

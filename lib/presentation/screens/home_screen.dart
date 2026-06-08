@@ -127,6 +127,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                     ),
                     const _StoreStatusBanner(),
                     _PromoBanner(onShopNow: _scrollToProducts),
+                    const _CouponSection(),
                     _TopOffersHorizontalSection(
                       productsAsync: productsAsync,
                       cartQtyById: cartQtyById,
@@ -667,7 +668,7 @@ class _SearchSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       color: AppColors.card,
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       child: Material(
         color: const Color(0xFFF3F4F6),
         borderRadius: BorderRadius.circular(24),
@@ -718,7 +719,7 @@ class _PromoBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: AspectRatio(
@@ -788,7 +789,7 @@ class _PromoBanner extends StatelessWidget {
                               ),
                               const SizedBox(height: 6),
                               const Text(
-                                'Daily Essentials',
+                                'Everyday Essentials',
                                 maxLines: 1,
                                 style: TextStyle(
                                   color: Colors.white,
@@ -804,7 +805,7 @@ class _PromoBanner extends StatelessWidget {
                                 style: TextStyle(
                                   color: AppColors.softGreen,
                                   fontSize: 11,
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w800,
                                 ),
                               ),
                               const SizedBox(height: 8),
@@ -844,67 +845,56 @@ class _PromoBanner extends StatelessWidget {
                       ),
                       Expanded(
                         flex: 4,
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            final height = constraints.maxHeight;
-                            final cardWidth = (constraints.maxWidth * 0.38).clamp(38.0, 54.0);
-                            final iconSize = (cardWidth * 0.3).clamp(12.0, 16.0);
-                            final containerSize = (cardWidth * 0.52).clamp(20.0, 28.0);
-                            final fontSize = (cardWidth * 0.16).clamp(7.0, 8.5);
-
-                            return Stack(
-                              alignment: Alignment.center,
-                              clipBehavior: Clip.none,
-                              children: [
-                                Positioned(
-                                  right: 0,
-                                  bottom: height * 0.1,
-                                  child: _BannerCollageCard(
-                                    width: cardWidth,
-                                    iconSize: iconSize,
-                                    containerSize: containerSize,
-                                    fontSize: fontSize,
-                                    icon: Icons.local_drink_rounded,
-                                    label: 'Dairy',
-                                    color: Colors.blue.shade50,
-                                    iconColor: Colors.blue.shade700,
-                                  ),
-                                ),
-                                Positioned(
-                                  left: 0,
-                                  top: height * 0.05,
-                                  child: _BannerCollageCard(
-                                    width: cardWidth,
-                                    iconSize: iconSize,
-                                    containerSize: containerSize,
-                                    fontSize: fontSize,
-                                    icon: Icons.rice_bowl_rounded,
-                                    label: 'Staples',
-                                    color: Colors.amber.shade50,
-                                    iconColor: Colors.amber.shade700,
-                                  ),
-                                ),
-                                Positioned(
-                                  left: constraints.maxWidth * 0.28,
-                                  top: height * 0.22,
-                                  child: Transform.rotate(
-                                    angle: 0.1,
-                                    child: _BannerCollageCard(
-                                      width: cardWidth,
-                                      iconSize: iconSize,
-                                      containerSize: containerSize,
-                                      fontSize: fontSize,
-                                      icon: Icons.apple_rounded,
-                                      label: 'Produce',
-                                      color: Colors.red.shade50,
-                                      iconColor: Colors.red.shade700,
-                                      elevated: true,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            // Soft shadow behind the image
+                            Positioned(
+                              right: -10,
+                              bottom: -5,
+                              child: Container(
+                                width: 140,
+                                height: 140,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.12),
+                                      blurRadius: 24,
+                                      offset: const Offset(-8, -4),
                                     ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            // Gradient transition overlay behind the image
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  gradient: RadialGradient(
+                                    colors: [
+                                      const Color(0xFF10B981).withValues(alpha: 0.3),
+                                      Colors.transparent,
+                                    ],
+                                    center: Alignment.centerRight,
+                                    radius: 0.8,
                                   ),
                                 ),
-                              ],
-                            );
-                          },
+                              ),
+                            ),
+                            // Scaled and positioned image emerging from the background
+                            Positioned.fill(
+                              child: Transform.scale(
+                                scale: 1.15,
+                                alignment: Alignment.bottomRight,
+                                child: Image.asset(
+                                  HomeText.bannerAsset,
+                                  fit: BoxFit.contain,
+                                  alignment: Alignment.bottomRight,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -914,76 +904,6 @@ class _PromoBanner extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _BannerCollageCard extends StatelessWidget {
-  const _BannerCollageCard({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.iconColor,
-    this.elevated = false,
-    this.width = 54,
-    this.iconSize = 16,
-    this.containerSize = 28,
-    this.fontSize = 8.5,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final Color iconColor;
-  final bool elevated;
-  final double width;
-  final double iconSize;
-  final double containerSize;
-  final double fontSize;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: elevated ? 0.15 : 0.08),
-            blurRadius: elevated ? 8 : 4,
-            offset: Offset(0, elevated ? 3 : 1.5),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: containerSize,
-            height: containerSize,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: iconColor, size: iconSize),
-          ),
-          const SizedBox(height: 2),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              label,
-              maxLines: 1,
-              style: TextStyle(
-                fontSize: fontSize,
-                color: AppColors.text,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1003,7 +923,7 @@ class _CategorySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textScale = MediaQuery.textScalerOf(context).scale(1);
-    final sectionHeight = (120.0 + (textScale - 1.0) * 24).clamp(120.0, 160.0);
+    final sectionHeight = (114.0 + (textScale - 1.0) * 24).clamp(114.0, 150.0);
 
     return _Section(
       title: HomeText.categoriesTitle,
@@ -1287,8 +1207,8 @@ class _TopOffersHorizontalSection extends StatelessWidget {
         }
 
         return Container(
-          margin: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          margin: const EdgeInsets.fromLTRB(12, 2, 12, 12),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
             color: AppColors.softGreen.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(16),
@@ -1301,7 +1221,7 @@ class _TopOffersHorizontalSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
                 child: Row(
                   children: [
                     const Icon(
@@ -1322,7 +1242,7 @@ class _TopOffersHorizontalSection extends StatelessWidget {
                 ),
               ),
               SizedBox(
-                height: 240,
+                height: 225,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -1353,8 +1273,8 @@ class _TopOffersHorizontalSection extends StatelessWidget {
         );
       },
       loading: () => Container(
-        margin: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-        padding: const EdgeInsets.symmetric(vertical: 14),
+        margin: const EdgeInsets.fromLTRB(12, 2, 12, 12),
+        padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
           color: AppColors.softGreen.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(16),
@@ -1367,7 +1287,7 @@ class _TopOffersHorizontalSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
               child: Row(
                 children: [
                   const Icon(
@@ -1388,7 +1308,7 @@ class _TopOffersHorizontalSection extends StatelessWidget {
               ),
             ),
             SizedBox(
-              height: 240,
+              height: 225,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -1504,8 +1424,8 @@ class _ProductGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final aspectRatio = constraints.maxWidth >= 720
-            ? 0.90
-            : (0.69 - (textScale - 1.0) * 0.18).clamp(0.52, 0.74);
+            ? 0.92
+            : (0.72 - (textScale - 1.0) * 0.18).clamp(0.55, 0.78);
 
         return GridView.builder(
           shrinkWrap: true,
@@ -1553,7 +1473,7 @@ class _Section extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2004,6 +1924,138 @@ class _StoreStatusBanner extends ConsumerWidget {
       },
       loading: () => const SizedBox.shrink(),
       error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _CouponSection extends StatelessWidget {
+  const _CouponSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: EdgeInsets.fromLTRB(12, 0, 12, 16),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 175,
+            child: _StaticCouponCard(
+              icon: Icons.local_offer_rounded,
+              iconColor: Color(0xFF10B981), // Green
+              title: '₹50 OFF',
+              subtitle: 'Above ₹2000',
+            ),
+          ),
+          SizedBox(width: 12),
+          SizedBox(
+            width: 175,
+            child: _StaticCouponCard(
+              icon: Icons.savings_rounded,
+              iconColor: Color(0xFFF59E0B), // Orange
+              title: '₹100 OFF',
+              subtitle: 'Above ₹3000',
+            ),
+          ),
+          SizedBox(width: 12),
+          SizedBox(
+            width: 175,
+            child: _StaticCouponCard(
+              icon: Icons.confirmation_number_rounded,
+              iconColor: Color(0xFF8B5CF6), // Purple
+              title: '₹150 OFF',
+              subtitle: 'Above ₹4000',
+            ),
+          ),
+          SizedBox(width: 12),
+          SizedBox(
+            width: 175,
+            child: _StaticCouponCard(
+              icon: Icons.local_shipping_rounded,
+              iconColor: Color(0xFF3B82F6), // Blue
+              title: 'FREE DELIVERY',
+              subtitle: 'Above ₹699',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StaticCouponCard extends StatelessWidget {
+  const _StaticCouponCard({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 4,
+            offset: const Offset(0, 1.5),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              color: iconColor,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 1.5),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: AppColors.mutedText,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

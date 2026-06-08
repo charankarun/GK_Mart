@@ -42,6 +42,7 @@ class Product {
   bool get isStockTracked => trackStock;
 
   bool get isLowStock {
+    if (!isAvailable) return false;
     if (!trackStock) return false;
     final quantity = stockQuantity;
     if (quantity == null) return false;

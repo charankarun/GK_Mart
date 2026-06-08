@@ -232,3 +232,7 @@ final productsByIdsProvider = FutureProvider.family<List<Product>, ProductIdsReq
   return ref.watch(productRepositoryProvider).fetchProductsByIds(request.ids);
 });
 
+final productStreamProvider = StreamProvider.family<Product?, String>((ref, productId) {
+  return ref.watch(productRepositoryProvider).watchProduct(productId);
+});
+

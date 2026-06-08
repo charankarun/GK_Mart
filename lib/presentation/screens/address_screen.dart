@@ -509,22 +509,38 @@ class _AddressFormView extends StatelessWidget {
             pincodeController: pincodeController,
           ),
           const SizedBox(height: 18),
-          Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 50,
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
                   child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 50),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadii.md),
+                      ),
+                    ),
                     onPressed: isSaving ? null : onCancel,
-                    child: const Text(AddressText.cancel),
+                    child: const Text(
+                      AddressText.cancel,
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: SizedBox(
-                  height: 50,
+                const SizedBox(width: 12),
+                Expanded(
                   child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(0, 50),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadii.md),
+                      ),
+                    ),
                     onPressed: isSaving ? null : onSave,
                     icon: isSaving
                         ? const SizedBox(
@@ -535,16 +551,18 @@ class _AddressFormView extends StatelessWidget {
                               color: Colors.white,
                             ),
                           )
-                        : const Icon(Icons.check_circle_rounded),
+                        : const Icon(Icons.check_circle_rounded, size: 18, color: Colors.white),
                     label: Text(
                       isEditingExisting
                           ? AddressText.updateAddress
                           : AddressText.saveAddress,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

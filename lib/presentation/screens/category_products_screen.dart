@@ -380,8 +380,8 @@ class _ProductGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final aspectRatio = constraints.maxWidth >= 720
-            ? 0.90
-            : (0.69 - (textScale - 1.0) * 0.18).clamp(0.52, 0.74);
+            ? 0.92
+            : (0.72 - (textScale - 1.0) * 0.18).clamp(0.55, 0.78);
 
         return GridView.builder(
           controller: controller,

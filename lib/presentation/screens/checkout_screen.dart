@@ -363,6 +363,18 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         final idx = latestProducts.indexWhere((p) => p.id == cartItem.productId);
         if (idx != -1) {
           final product = latestProducts[idx];
+          if (!product.isAvailable || product.isStockEmpty) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context)
+              ..clearSnackBars()
+              ..showSnackBar(
+                SnackBar(
+                  content: Text('${product.name} is out of stock.'),
+                  duration: const Duration(seconds: 5),
+                ),
+              );
+            return;
+          }
           if (product.trackStock) {
             final stock = product.stockQuantity ?? 0;
             if (stock < cartItem.quantity) {

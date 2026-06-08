@@ -72,6 +72,28 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   @override
+  Stream<Product?> watchProduct(String productId) {
+    final normalizedProductId = productId.trim();
+    if (normalizedProductId.isEmpty) return Stream.value(null);
+
+    return RepositoryGuard.watch(
+      message: 'Unable to load product.',
+      create: () async* {
+        // Yield cached product first if exists
+        final cached = _productCache[normalizedProductId];
+        if (cached != null) yield cached;
+
+        yield* _products.doc(normalizedProductId).snapshots().map((snapshot) {
+          if (!snapshot.exists) return null;
+          final product = ProductModel.fromFirestore(snapshot);
+          _productCache[product.id] = product;
+          return product;
+        });
+      },
+    );
+  }
+
+  @override
   Future<List<Product>> fetchProductsByIds(List<String> productIds) {
     final ids = _normalizeProductIds(productIds);
     if (ids.isEmpty) return Future.value(const <Product>[]);

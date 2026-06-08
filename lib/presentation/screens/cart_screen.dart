@@ -63,12 +63,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                     separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final item = cartItems[index];
-                      final productsAsync = ref.watch(productsByIdsProvider(ProductIdsRequest([item.productId])));
+                      final productAsync = ref.watch(productStreamProvider(item.productId));
                       
-                      return productsAsync.when(
-                        data: (list) {
-                          final idx = list.indexWhere((p) => p.id == item.productId);
-                          final product = idx != -1 ? list[idx] : null;
+                      return productAsync.when(
+                        data: (product) {
                           final isMax = product != null && product.trackStock && item.quantity >= (product.stockQuantity ?? 0);
                           
                           return _CartItemCard(
