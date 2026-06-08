@@ -18,6 +18,8 @@ import '../providers/commerce_providers.dart';
 import '../providers/order_providers.dart';
 import '../providers/repository_providers.dart';
 import '../providers/store_providers.dart';
+import '../widgets/app_cached_network_image.dart';
+import '../widgets/app_state_widgets.dart';
 import 'address_screen.dart';
 import 'order_success_screen.dart';
 
@@ -36,6 +38,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   final pincodeController = TextEditingController();
   bool hasSeededProfile = false;
   bool hasLoggedBeginCheckout = false;
+  bool isEditingDetails = false;
 
   @override
   void dispose() {
@@ -58,7 +61,17 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     }
 
     final activeAddress = ref.watch(activeAddressProvider);
-    final profile = ref.watch(currentUserProfileProvider).maybeWhen(
+    final profileAsync = ref.watch(currentUserProfileProvider);
+    final isProfileLoading = profileAsync.isLoading && !hasSeededProfile;
+
+    if (isProfileLoading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text(CheckoutText.title)),
+        body: const _CheckoutSkeleton(),
+      );
+    }
+
+    final profile = profileAsync.maybeWhen(
           data: (user) => user,
           orElse: () => null,
         );
@@ -104,10 +117,16 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       isStoreClosed = false;
     }
 
+    final hasAddress = addressController.text.trim().isNotEmpty;
+    final hasName = nameController.text.trim().isNotEmpty;
+    final hasPhone = phoneController.text.trim().isNotEmpty;
+    final hasPincode = pincodeController.text.trim().isNotEmpty;
+    final showForm = isEditingDetails || !hasAddress || !hasName || !hasPhone || !hasPincode;
+
     return Scaffold(
       appBar: AppBar(title: const Text(CheckoutText.title)),
       body: cartItems.isEmpty
-          ? const Center(child: Text(CheckoutText.emptyCart))
+          ? const _EmptyCheckout()
           : Form(
               key: formKey,
               child: Column(
@@ -144,22 +163,101 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                           ),
                           const SizedBox(height: 12),
                         ],
-                        _OrderItemsPreview(items: cartItems),
-                        const SizedBox(height: 12),
-                        _SavedAddressCard(
-                          address: activeAddress.isNotEmpty ? activeAddress : (profile?.address ?? ''),
-                          onManageAddress: _openAddressScreen,
+                        _OrderItemsPreview(
+                          items: cartItems,
+                          onTap: () => _showAllItemsBottomSheet(context, cartItems),
                         ),
                         const SizedBox(height: 12),
-                        _CheckoutFields(
-                          nameController: nameController,
-                          phoneController: phoneController,
-                          addressController: addressController,
-                          pincodeController: pincodeController,
-                          serviceablePincodes: ref.watch(
-                            serviceablePincodesProvider,
+                        if (showForm) ...[
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: AppColors.card,
+                              borderRadius: BorderRadius.circular(AppRadii.lg),
+                              border: Border.all(color: AppColors.border),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.03),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text(
+                                      'Delivery Details',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    Row(
+                                      children: [
+                                        TextButton(
+                                          onPressed: _openAddressScreen,
+                                          style: TextButton.styleFrom(
+                                            visualDensity: VisualDensity.compact,
+                                            padding: EdgeInsets.zero,
+                                          ),
+                                          child: const Text('Saved Address'),
+                                        ),
+                                        if (hasAddress && hasName && hasPhone && hasPincode) ...[
+                                          const SizedBox(width: 8),
+                                          TextButton.icon(
+                                            onPressed: () {
+                                              if (formKey.currentState?.validate() == true) {
+                                                setState(() {
+                                                  isEditingDetails = false;
+                                                });
+                                              }
+                                            },
+                                            icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
+                                            label: const Text('Save'),
+                                            style: TextButton.styleFrom(
+                                              visualDensity: VisualDensity.compact,
+                                              padding: EdgeInsets.zero,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                _CheckoutFields(
+                                  nameController: nameController,
+                                  phoneController: phoneController,
+                                  addressController: addressController,
+                                  pincodeController: pincodeController,
+                                  serviceablePincodes: ref.watch(
+                                    serviceablePincodesProvider,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
+                        ] else ...[
+                          _SavedAddressCard(
+                            name: nameController.text.trim(),
+                            phone: phoneController.text.trim(),
+                            address: addressController.text.trim(),
+                            pincode: pincodeController.text.trim(),
+                            onChangeAddress: _openAddressScreen,
+                            onEditDetails: () {
+                              setState(() {
+                                isEditingDetails = true;
+                              });
+                            },
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        const _DeliveryEtaCard(),
                         const SizedBox(height: 12),
                         const _PaymentMethodCard(),
                       ],
@@ -190,11 +288,67 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   }) async {
     _logCheckoutOrder('Place Order clicked');
     if (ref.read(orderCreationControllerProvider).isLoading) return;
-    if (formKey.currentState?.validate() != true) {
-      _logCheckoutOrder(
-          'Stopped before order request: checkout validation failed.');
-      return;
+
+    final hasAddress = addressController.text.trim().isNotEmpty;
+    final hasName = nameController.text.trim().isNotEmpty;
+    final hasPhone = phoneController.text.trim().isNotEmpty;
+    final hasPincode = pincodeController.text.trim().isNotEmpty;
+    final showForm = isEditingDetails || !hasAddress || !hasName || !hasPhone || !hasPincode;
+
+    if (!showForm) {
+      final name = nameController.text.trim();
+      final phone = phoneController.text.trim();
+      final address = addressController.text.trim();
+      final pincode = pincodeController.text.trim();
+
+      if (name.isEmpty || address.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please fill all delivery details.')),
+        );
+        setState(() {
+          isEditingDetails = true;
+        });
+        return;
+      }
+
+      if (!PhoneNumberNormalizer.isIndianLocalNumber(phone)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enter a valid 10-digit phone number')),
+        );
+        setState(() {
+          isEditingDetails = true;
+        });
+        return;
+      }
+
+      if (!RegExp(r'^[0-9]{6}$').hasMatch(pincode)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enter a valid 6-digit pincode')),
+        );
+        setState(() {
+          isEditingDetails = true;
+        });
+        return;
+      }
+
+      final serviceablePincodes = ref.read(serviceablePincodesProvider);
+      if (!serviceablePincodes.contains(pincode)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Delivery is not available here')),
+        );
+        setState(() {
+          isEditingDetails = true;
+        });
+        return;
+      }
+    } else {
+      if (formKey.currentState?.validate() != true) {
+        _logCheckoutOrder(
+            'Stopped before order request: checkout validation failed.');
+        return;
+      }
     }
+
     _logCheckoutOrder('Validation passed');
     if (cartItems.isEmpty) {
       _logCheckoutOrder('Stopped before order request: cart is empty.');
@@ -336,6 +490,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     if (pincode.isNotEmpty) pincodeController.text = pincode;
   }
 
+  void _showAllItemsBottomSheet(BuildContext context, List<CartItem> items) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _AllItemsBottomSheet(items: items),
+    );
+  }
+
   OrderItem _toOrderItem(CartItem item) {
     return OrderItem(
       productId: item.productId,
@@ -361,36 +524,324 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 }
 
 class _OrderItemsPreview extends StatelessWidget {
-  const _OrderItemsPreview({required this.items});
+  const _OrderItemsPreview({
+    required this.items,
+    required this.onTap,
+  });
+
+  final List<CartItem> items;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final displayedItems = items.take(3).toList();
+    final remainingCount = items.length - displayedItems.length;
+
+    return _CheckoutSection(
+      title: 'Order Items (${items.length})',
+      child: SizedBox(
+        height: 72,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: displayedItems.length + (remainingCount > 0 ? 1 : 0),
+          separatorBuilder: (_, __) => const SizedBox(width: 12),
+          itemBuilder: (context, index) {
+            if (index < displayedItems.length) {
+              final item = displayedItems[index];
+              return InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(8),
+                child: Stack(
+                  children: [
+                    Container(
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(7),
+                        child: AppCachedNetworkImage(
+                          imageUrl: item.imageUrl.trim(),
+                          fit: BoxFit.cover,
+                          placeholder: const AppSkeletonPulse(width: 64, height: 64),
+                          errorPlaceholder: const _ThumbnailErrorPlaceholder(),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(6),
+                            bottomRight: Radius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          'x${item.quantity}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            } else {
+              return InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: AppColors.softGreen,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+                  ),
+                  child: Center(
+                    child: Text(
+                      '+$remainingCount\nmore',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: AppColors.primaryDark,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        height: 1.1,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ThumbnailErrorPlaceholder extends StatelessWidget {
+  const _ThumbnailErrorPlaceholder({this.iconSize = 16});
+
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(color: AppColors.background),
+      child: Center(
+        child: Icon(
+          Icons.local_grocery_store_rounded,
+          color: AppColors.mutedText,
+          size: iconSize,
+        ),
+      ),
+    );
+  }
+}
+
+class _AllItemsBottomSheet extends StatelessWidget {
+  const _AllItemsBottomSheet({required this.items});
 
   final List<CartItem> items;
 
   @override
   Widget build(BuildContext context) {
-    return _CheckoutSection(
-      title: CheckoutText.items,
-      child: Column(
-        children: [
-          for (final item in items)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
+    final mediaQuery = MediaQuery.of(context);
+    final maxHeight = mediaQuery.size.height * 0.65; // ~65% screen height
+
+    int totalQty = 0;
+    double subtotalValue = 0.0;
+    for (final item in items) {
+      totalQty += item.quantity;
+      subtotalValue += item.lineTotal;
+    }
+
+    return Container(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      decoration: const BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(vertical: 10),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded(
-                    child: Text(
-                      '${item.name} x ${item.quantity}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                  Text(
+                    'Items in Cart (${items.length})',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
-                  Text(
-                    '\u20B9${_formatPrice(item.lineTotal)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(context),
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                   ),
                 ],
               ),
-            ),
-        ],
+              const SizedBox(height: 8),
+              const Divider(height: 1, color: AppColors.border),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: items.length,
+                  separatorBuilder: (_, __) => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Divider(height: 1, color: AppColors.border),
+                  ),
+                  itemBuilder: (context, index) {
+                    final item = items[index];
+                    return Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(5),
+                            child: AppCachedNetworkImage(
+                              imageUrl: item.imageUrl.trim(),
+                              fit: BoxFit.cover,
+                              placeholder: const AppSkeletonPulse(width: 40, height: 40),
+                              errorPlaceholder: const _ThumbnailErrorPlaceholder(iconSize: 12),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.text,
+                                ),
+                              ),
+                              if (item.unit.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  item.unit,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.mutedText,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          'x${item.quantity}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Text(
+                          '₹${_formatPrice(item.lineTotal)}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.text,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: const BoxDecoration(
+                  border: Border(
+                    top: BorderSide(color: AppColors.border),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Subtotal',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.mutedText,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '$totalQty ${totalQty == 1 ? "item" : "items"}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.text,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      '₹${_formatPrice(subtotalValue)}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -402,63 +853,106 @@ class _OrderItemsPreview extends StatelessWidget {
 
 class _SavedAddressCard extends StatelessWidget {
   const _SavedAddressCard({
+    required this.name,
+    required this.phone,
     required this.address,
-    required this.onManageAddress,
+    required this.pincode,
+    required this.onChangeAddress,
+    required this.onEditDetails,
   });
 
+  final String name;
+  final String phone;
   final String address;
-  final VoidCallback onManageAddress;
+  final String pincode;
+  final VoidCallback onChangeAddress;
+  final VoidCallback onEditDetails;
 
   @override
   Widget build(BuildContext context) {
-    final visibleAddress = address.trim();
-
     return _CheckoutSection(
-      title: CheckoutText.savedAddress,
+      title: 'Delivery Address',
       trailing: TextButton.icon(
-        onPressed: onManageAddress,
-        icon: Icon(
-          visibleAddress.isEmpty ? Icons.add_location_alt : Icons.edit_location,
-          size: 18,
-        ),
-        label: Text(
-          visibleAddress.isEmpty
-              ? CheckoutText.addAddress
-              : CheckoutText.changeAddress,
+        onPressed: onChangeAddress,
+        icon: const Icon(Icons.edit_location_alt_rounded, size: 16),
+        label: const Text('Change'),
+        style: TextButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
         ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 42,
-            height: 42,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              color: visibleAddress.isEmpty
-                  ? AppColors.softOrange
-                  : AppColors.softGreen,
+              color: AppColors.softGreen,
               borderRadius: BorderRadius.circular(AppRadii.md),
             ),
-            child: Icon(
+            child: const Icon(
               Icons.location_on_rounded,
-              color:
-                  visibleAddress.isEmpty ? AppColors.accent : AppColors.primary,
+              color: AppColors.primary,
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              visibleAddress.isEmpty
-                  ? CheckoutText.noSavedAddress
-                  : visibleAddress,
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color:
-                    visibleAddress.isEmpty ? AppColors.accent : AppColors.text,
-                height: 1.3,
-                fontWeight: FontWeight.w700,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              color: AppColors.text,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            phone,
+                            style: const TextStyle(
+                              color: AppColors.mutedText,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onEditDetails,
+                      icon: const Icon(Icons.edit_rounded, size: 16, color: AppColors.primary),
+                      style: IconButton.styleFrom(
+                        padding: const EdgeInsets.all(4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '$address, $pincode',
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontSize: 13,
+                    height: 1.3,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -484,38 +978,35 @@ class _CheckoutFields extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _CheckoutSection(
-      title: CheckoutText.deliveryDetails,
-      child: Column(
-        children: [
-          _CheckoutInput(
-            controller: nameController,
-            label: CheckoutText.name,
-            validator: _required,
-          ),
-          const SizedBox(height: 12),
-          _CheckoutInput(
-            controller: phoneController,
-            label: CheckoutText.phone,
-            keyboardType: TextInputType.phone,
-            validator: _phoneValidator,
-          ),
-          const SizedBox(height: 12),
-          _CheckoutInput(
-            controller: addressController,
-            label: CheckoutText.address,
-            maxLines: 3,
-            validator: _required,
-          ),
-          const SizedBox(height: 12),
-          _CheckoutInput(
-            controller: pincodeController,
-            label: CheckoutText.pincode,
-            keyboardType: TextInputType.number,
-            validator: _pincodeValidator,
-          ),
-        ],
-      ),
+    return Column(
+      children: [
+        _CheckoutInput(
+          controller: nameController,
+          label: CheckoutText.name,
+          validator: _required,
+        ),
+        const SizedBox(height: 12),
+        _CheckoutInput(
+          controller: phoneController,
+          label: CheckoutText.phone,
+          keyboardType: TextInputType.phone,
+          validator: _phoneValidator,
+        ),
+        const SizedBox(height: 12),
+        _CheckoutInput(
+          controller: addressController,
+          label: CheckoutText.address,
+          maxLines: 3,
+          validator: _required,
+        ),
+        const SizedBox(height: 12),
+        _CheckoutInput(
+          controller: pincodeController,
+          label: CheckoutText.pincode,
+          keyboardType: TextInputType.number,
+          validator: _pincodeValidator,
+        ),
+      ],
     );
   }
 
@@ -585,18 +1076,40 @@ class _PaymentMethodCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const _CheckoutSection(
+    return _CheckoutSection(
       title: CheckoutText.payment,
-      child: Row(
+      child: Column(
         children: [
-          Icon(Icons.payments, color: AppColors.primary),
-          SizedBox(width: 10),
-          Text(
-            CheckoutText.cashOnDelivery,
-            style: TextStyle(fontWeight: FontWeight.bold),
+          const Row(
+            children: [
+              Icon(Icons.payments_rounded, color: AppColors.primary),
+              SizedBox(width: 10),
+              Text(
+                CheckoutText.cashOnDelivery,
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+              ),
+              Spacer(),
+              Icon(Icons.check_circle_rounded, color: AppColors.primary),
+            ],
           ),
-          Spacer(),
-          Icon(Icons.check_circle, color: AppColors.primary),
+          const SizedBox(height: 12),
+          const Divider(height: 1, color: AppColors.border),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.shield_rounded, color: Colors.green.shade700, size: 16),
+              const SizedBox(width: 6),
+              Text(
+                'Safe & Secure Checkout',
+                style: TextStyle(
+                  color: Colors.green.shade800,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -656,7 +1169,7 @@ class _CheckoutSection extends StatelessWidget {
   }
 }
 
-class _CheckoutSummary extends StatelessWidget {
+class _CheckoutSummary extends StatefulWidget {
   const _CheckoutSummary({
     required this.pricing,
     required this.isLoading,
@@ -670,9 +1183,16 @@ class _CheckoutSummary extends StatelessWidget {
   final bool isStoreClosed;
 
   @override
+  State<_CheckoutSummary> createState() => _CheckoutSummaryState();
+}
+
+class _CheckoutSummaryState extends State<_CheckoutSummary> {
+  bool _isExpanded = false;
+
+  @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -693,63 +1213,137 @@ class _CheckoutSummary extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.border),
             ),
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Bill Details',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.text,
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      _isExpanded = !_isExpanded;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Bill Details',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.text,
+                          ),
+                        ),
+                        if (widget.pricing.totalSavings > 0) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: AppColors.softGreen,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppColors.primary.withValues(alpha: 0.1)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text(
+                                  '🎉',
+                                  style: TextStyle(fontSize: 10),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Saved \u20B9${_formatPrice(widget.pricing.totalSavings)}',
+                                  style: const TextStyle(
+                                    color: AppColors.primaryDark,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        const Spacer(),
+                        AnimatedRotation(
+                          turns: _isExpanded ? 0.5 : 0.0,
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeInOutCubic,
+                          child: const Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: AppColors.mutedText,
+                            size: 20,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 10),
-                _SummaryRow(
-                  label: CheckoutText.originalAmount,
-                  value: '\u20B9${_formatPrice(pricing.originalAmount)}',
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeInOutCubic,
+                  child: _isExpanded
+                      ? Column(
+                          children: [
+                            const SizedBox(height: 8),
+                            _SummaryRow(
+                              label: CheckoutText.originalAmount,
+                              value: '\u20B9${_formatPrice(widget.pricing.originalAmount)}',
+                              labelColor: AppColors.mutedText,
+                              fontSize: 13,
+                            ),
+                            if (widget.pricing.productSavings > 0) ...[
+                              const SizedBox(height: 6),
+                              _SummaryRow(
+                                label: 'Product Savings',
+                                value: '-\u20B9${_formatPrice(widget.pricing.productSavings)}',
+                                valueColor: AppColors.primary,
+                                labelColor: AppColors.mutedText,
+                                fontSize: 13,
+                              ),
+                            ],
+                            const SizedBox(height: 6),
+                            _SummaryRow(
+                              label: CheckoutText.cartDiscount,
+                              value: widget.pricing.cartDiscount > 0
+                                  ? '-\u20B9${_formatPrice(widget.pricing.cartDiscount)}'
+                                  : '\u20B90',
+                              valueColor: AppColors.primary,
+                              labelColor: AppColors.mutedText,
+                              fontSize: 13,
+                            ),
+                            const SizedBox(height: 6),
+                            _SummaryRow(
+                              label: CheckoutText.deliveryFee,
+                              value: widget.pricing.deliveryFee > 0
+                                  ? '\u20B9${_formatPrice(widget.pricing.deliveryFee)}'
+                                  : CheckoutText.free,
+                              valueColor: widget.pricing.deliveryFee > 0 ? null : AppColors.primary,
+                              labelColor: AppColors.mutedText,
+                              fontSize: 13,
+                            ),
+                          ],
+                        )
+                      : const SizedBox.shrink(),
                 ),
-                const SizedBox(height: 6),
-                _SummaryRow(
-                  label: CheckoutText.cartDiscount,
-                  value: pricing.cartDiscount > 0
-                      ? '-\u20B9${_formatPrice(pricing.cartDiscount)}'
-                      : '\u20B90',
-                  valueColor: AppColors.primary,
-                ),
-                const SizedBox(height: 6),
-                _SummaryRow(
-                  label: CheckoutText.deliveryFee,
-                  value: pricing.deliveryFee > 0
-                      ? '\u20B9${_formatPrice(pricing.deliveryFee)}'
-                      : CheckoutText.free,
-                  valueColor: pricing.deliveryFee > 0 ? null : AppColors.primary,
-                ),
-                if (pricing.totalSavings > 0) ...[
-                  const SizedBox(height: 6),
-                  _SummaryRow(
-                    label: CheckoutText.totalSavings,
-                    value: '\u20B9${_formatPrice(pricing.totalSavings)}',
-                    valueColor: AppColors.primary,
-                  ),
-                ],
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
                   child: Divider(height: 1, color: AppColors.border),
                 ),
                 _SummaryRow(
                   label: CheckoutText.finalPayable,
-                  value: '\u20B9${_formatPrice(pricing.finalPayable)}',
+                  value: '\u20B9${_formatPrice(widget.pricing.finalPayable)}',
                   isBold: true,
+                  fontSize: 14,
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
-            height: 48,
+            height: 50,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
@@ -759,8 +1353,8 @@ class _CheckoutSummary extends StatelessWidget {
                 ),
                 elevation: 0,
               ),
-              onPressed: isLoading || isStoreClosed ? null : onPlaceOrder,
-              child: isLoading
+              onPressed: widget.isLoading || widget.isStoreClosed ? null : widget.onPlaceOrder,
+              child: widget.isLoading
                   ? const SizedBox(
                       width: 22,
                       height: 22,
@@ -769,9 +1363,16 @@ class _CheckoutSummary extends StatelessWidget {
                         color: Colors.white,
                       ),
                     )
-                  : const Text(
-                      CheckoutText.placeOrder,
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white),
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.bolt_rounded, size: 18, color: Colors.white),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Place Order \u2022 \u20B9${_formatPrice(widget.pricing.finalPayable)}',
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white),
+                        ),
+                      ],
                     ),
             ),
           ),
@@ -785,22 +1386,288 @@ class _CheckoutSummary extends StatelessWidget {
   }
 }
 
+class _DeliveryEtaCard extends StatelessWidget {
+  const _DeliveryEtaCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.softGreen.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.15)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.bolt_rounded,
+              color: AppColors.primary,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Delivery Today',
+                  style: TextStyle(
+                    color: AppColors.primaryDark,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Estimated Delivery: 20\u201330 mins',
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CheckoutSkeleton extends StatelessWidget {
+  const _CheckoutSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const AppSkeletonPulse(width: 100, height: 16),
+              const SizedBox(height: 12),
+              Row(
+                children: const [
+                  AppSkeletonPulse(width: 64, height: 64),
+                  SizedBox(width: 12),
+                  AppSkeletonPulse(width: 64, height: 64),
+                  SizedBox(width: 12),
+                  AppSkeletonPulse(width: 64, height: 64),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: const [
+                  AppSkeletonPulse(width: 120, height: 16),
+                  AppSkeletonPulse(width: 60, height: 14),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const AppSkeletonPulse(width: 40, height: 40),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        AppSkeletonPulse(width: 150, height: 14),
+                        SizedBox(height: 6),
+                        AppSkeletonPulse(width: 220, height: 14),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            children: const [
+              AppSkeletonPulse(width: 36, height: 36, borderRadius: 18),
+              SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppSkeletonPulse(width: 100, height: 14),
+                  SizedBox(height: 6),
+                  AppSkeletonPulse(width: 160, height: 12),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            children: const [
+              AppSkeletonPulse(width: 24, height: 24),
+              SizedBox(width: 12),
+              AppSkeletonPulse(width: 140, height: 14),
+              Spacer(),
+              AppSkeletonPulse(width: 20, height: 20, borderRadius: 10),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EmptyCheckout extends StatelessWidget {
+  const _EmptyCheckout();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 96,
+              height: 96,
+              decoration: BoxDecoration(
+                color: AppColors.softGreen,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.1),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: const Center(
+                child: Text(
+                  '🛒',
+                  style: TextStyle(fontSize: 40),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Your cart is empty',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.5,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Add items to your cart before checking out.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.mutedText,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 28),
+            SizedBox(
+              width: 200,
+              height: 48,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  elevation: 0,
+                ),
+                onPressed: () {
+                  Navigator.pop(context); // Go back to cart/home
+                },
+                child: const Text(
+                  'Go Back',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SummaryRow extends StatelessWidget {
   const _SummaryRow({
     required this.label,
     required this.value,
     this.valueColor,
+    this.labelColor,
     this.isBold = false,
+    this.fontSize = 13,
   });
 
   final String label;
   final String value;
   final Color? valueColor;
+  final Color? labelColor;
   final bool isBold;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
-    final weight = isBold ? FontWeight.bold : FontWeight.w600;
+    final weight = isBold ? FontWeight.w900 : FontWeight.w600;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -808,15 +1675,20 @@ class _SummaryRow extends StatelessWidget {
         Expanded(
           child: Text(
             label,
-            style: TextStyle(fontWeight: weight),
+            style: TextStyle(
+              fontWeight: weight,
+              fontSize: fontSize,
+              color: labelColor ?? AppColors.text,
+            ),
           ),
         ),
         const SizedBox(width: 8),
         Text(
           value,
           style: TextStyle(
-            color: valueColor,
+            color: valueColor ?? AppColors.text,
             fontWeight: weight,
+            fontSize: fontSize,
           ),
         ),
       ],

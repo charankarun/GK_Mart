@@ -7,6 +7,7 @@ import 'package:supermarket_app/domain/repositories/cart_repository.dart';
 import 'package:supermarket_app/presentation/providers/auth_providers.dart';
 import 'package:supermarket_app/presentation/providers/commerce_providers.dart';
 import 'package:supermarket_app/presentation/providers/repository_providers.dart';
+import 'package:supermarket_app/services/analytics_service.dart';
 
 void main() {
   test('cart count updates immediately after addProduct calls', () async {
@@ -17,6 +18,7 @@ void main() {
           return const AuthSession(uid: 'customer-1');
         }),
         cartRepositoryProvider.overrideWith((ref) => repository),
+        analyticsServiceProvider.overrideWithValue(FakeAnalyticsService()),
       ],
     );
     addTearDown(container.dispose);
@@ -52,6 +54,7 @@ void main() {
           return const AuthSession(uid: 'customer-1');
         }),
         cartRepositoryProvider.overrideWith((ref) => repository),
+        analyticsServiceProvider.overrideWithValue(FakeAnalyticsService()),
       ],
     );
     addTearDown(container.dispose);
@@ -163,4 +166,40 @@ class _FakeCartRepository implements CartRepository {
     }
     persistedQuantities[item.productId] = quantity;
   }
+}
+
+class FakeAnalyticsService implements AnalyticsService {
+  @override
+  dynamic get _analytics => throw UnimplementedError();
+
+  @override
+  Future<void> logLogin(String method) async {}
+
+  @override
+  Future<void> logAddToCart({
+    required String itemId,
+    required String itemName,
+    required double price,
+    required int quantity,
+  }) async {}
+
+  @override
+  Future<void> logRemoveFromCart({
+    required String itemId,
+    required String itemName,
+    required double price,
+    required int quantity,
+  }) async {}
+
+  @override
+  Future<void> logBeginCheckout({
+    required double value,
+    required int totalItems,
+  }) async {}
+
+  @override
+  Future<void> logPurchaseAttempt({
+    required String orderId,
+    required double value,
+  }) async {}
 }

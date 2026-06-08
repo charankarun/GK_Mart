@@ -7,8 +7,8 @@ import 'package:supermarket_app/domain/entities/auth_session.dart';
 import 'package:supermarket_app/presentation/providers/commerce_providers.dart';
 import 'package:supermarket_app/presentation/providers/repository_providers.dart';
 import 'package:supermarket_app/presentation/providers/auth_providers.dart';
-
 import 'package:supermarket_app/presentation/providers/catalog_providers.dart';
+import 'package:supermarket_app/services/analytics_service.dart';
 
 void main() {
   test('Product stock state behaves correctly based on trackStock toggle', () {
@@ -67,6 +67,7 @@ void main() {
           const AuthSession(uid: 'user-1'),
         ),
         cartRepositoryProvider.overrideWithValue(cartRepo),
+        analyticsServiceProvider.overrideWithValue(FakeAnalyticsService()),
         productsByIdsProvider.overrideWith((ref, request) async {
           if (request.ids.contains(product.id)) {
             return [product];
@@ -128,4 +129,40 @@ class _FakeCartRepository implements CartRepository {
 
   @override
   Future<void> clearCart(String userId) async {}
+}
+
+class FakeAnalyticsService implements AnalyticsService {
+  @override
+  dynamic get _analytics => throw UnimplementedError();
+
+  @override
+  Future<void> logLogin(String method) async {}
+
+  @override
+  Future<void> logAddToCart({
+    required String itemId,
+    required String itemName,
+    required double price,
+    required int quantity,
+  }) async {}
+
+  @override
+  Future<void> logRemoveFromCart({
+    required String itemId,
+    required String itemName,
+    required double price,
+    required int quantity,
+  }) async {}
+
+  @override
+  Future<void> logBeginCheckout({
+    required double value,
+    required int totalItems,
+  }) async {}
+
+  @override
+  Future<void> logPurchaseAttempt({
+    required String orderId,
+    required double value,
+  }) async {}
 }
