@@ -45,6 +45,7 @@ class Order {
     required this.status,
     this.paymentMethod = 'COD',
     this.createdAt,
+    this.failureReason,
   });
 
   final String id;
@@ -63,8 +64,14 @@ class Order {
   final String status;
   final String paymentMethod;
   final DateTime? createdAt;
+  final String? failureReason;
 
-  String get displayId => (orderId?.isNotEmpty == true) ? orderId! : id.toUpperCase();
+  String get displayId {
+    if (orderId != null && orderId!.startsWith('GK')) {
+      return orderId!;
+    }
+    return status == 'Failed' ? 'Validation Failed' : 'Order Not Created';
+  }
 
   String get customerName => userName;
 
@@ -133,6 +140,7 @@ class OrderStatus {
   static const outForDelivery = 'Out for Delivery';
   static const delivered = 'Delivered';
   static const cancelled = 'Cancelled';
+  static const failed = 'Failed';
 
   static const values = [
     pending,
@@ -144,6 +152,7 @@ class OrderStatus {
     outForDelivery,
     delivered,
     cancelled,
+    failed,
   ];
 
   static String normalize(String? status) {
@@ -151,7 +160,8 @@ class OrderStatus {
     if (trimmed == null || trimmed.isEmpty) return placed;
     final lowerStatus = trimmed.toLowerCase();
 
-    if (lowerStatus == 'pending') return placed;
+    if (lowerStatus == 'pending') return pending;
+    if (lowerStatus == 'failed') return failed;
     if (lowerStatus == 'confirmed') return confirmed;
     if (lowerStatus == 'order confirmed') return confirmed;
     if (lowerStatus == 'processing') return packed;

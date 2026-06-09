@@ -1,4 +1,4 @@
-package com.example.supermarket_app
+package com.gkmart.app
 
 import android.content.Intent
 import android.net.Uri

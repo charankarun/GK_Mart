@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/legacy.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/errors/repository_exception.dart';
-import '../../core/notifications/notification_service.dart';
 import '../../core/utils/phone_number_normalizer.dart';
 import '../../domain/entities/order.dart';
 import '../../domain/entities/order_analytics.dart';
@@ -174,9 +173,46 @@ class OrderCreationController extends StateNotifier<AsyncValue<String?>> {
       final orderId = await _ref.read(orderRepositoryProvider).createOrder(
             request,
           );
-      state = AsyncData(orderId);
-      _orderCreationLog('Controller createOrder success orderId=$orderId.');
-      return orderId;
+      
+      final completer = Completer<String>();
+      StreamSubscription<Order?>? subscription;
+      
+      subscription = _ref.read(orderRepositoryProvider).watchOrder(orderId).listen(
+        (order) {
+          if (order == null) return;
+          if (order.status == 'Placed') {
+            subscription?.cancel();
+            completer.complete(orderId);
+          } else if (order.status == 'Failed') {
+            subscription?.cancel();
+            completer.completeError(
+              RepositoryException(
+                order.failureReason ?? 'Validation Failed. Please place the order again.',
+              ),
+            );
+          }
+        },
+        onError: (err) {
+          subscription?.cancel();
+          completer.completeError(err);
+        },
+        cancelOnError: true,
+      );
+
+      final resultOrderId = await completer.future.timeout(
+        const Duration(seconds: 20),
+        onTimeout: () {
+          subscription?.cancel();
+          throw const RepositoryException(
+            'Order processing is taking longer than expected.\nPlease check your Orders page to verify.',
+            code: 'timeout',
+          );
+        },
+      );
+
+      state = AsyncData(resultOrderId);
+      _orderCreationLog('Controller createOrder success orderId=$resultOrderId.');
+      return resultOrderId;
     } catch (error, stackTrace) {
       state = AsyncError(error, stackTrace);
       _orderCreationLog(

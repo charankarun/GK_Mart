@@ -24,7 +24,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.invalidate(productsByIdsProvider);
+      ref.read(cartSyncProvider.notifier).syncCart();
     });
   }
 
@@ -42,27 +42,43 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final cartItems = ref.watch(cartItemsProvider);
     final pricing = ref.watch(cartPricingSummaryProvider);
     final cartController = ref.read(cartControllerProvider.notifier);
+    final syncState = ref.watch(cartSyncProvider);
+
+    final displayedItems = syncState.recalculatedItems ?? cartItems;
+    final displayedPricing = syncState.recalculatedPricing ?? pricing;
+    final hasUnavailable = syncState.unavailableProductIds.isNotEmpty;
 
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(title: const Text(CartText.title)),
-      body: cartItems.isEmpty
+      body: displayedItems.isEmpty
           ? const _EmptyCart()
           : Column(
               children: [
+                if (syncState.syncMessage != null) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: _SyncWarningBanner(message: syncState.syncMessage!),
+                  ),
+                ],
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                   child: _FreeDeliveryProgressBar(
-                    originalAmount: pricing.originalAmount,
+                    originalAmount: displayedPricing.originalAmount,
                   ),
                 ),
                 Expanded(
                   child: ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-                    itemCount: cartItems.length,
+                    itemCount: displayedItems.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
-                      final item = cartItems[index];
+                      final item = displayedItems[index];
+                      final isPriceChanged = syncState.priceChangedProductIds.contains(item.productId);
+                      final isUnavailable = syncState.unavailableProductIds.contains(item.productId);
+                      final oldPrice = syncState.oldPrices[item.productId];
+                      final newPrice = syncState.newPrices[item.productId];
+
                       final productAsync = ref.watch(productStreamProvider(item.productId));
                       
                       return productAsync.when(
@@ -71,10 +87,14 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                           
                           return _CartItemCard(
                             item: item,
-                            onIncrement: isMax ? null : () {
+                            isPriceChanged: isPriceChanged,
+                            oldPrice: oldPrice,
+                            newPrice: newPrice,
+                            isUnavailable: isUnavailable,
+                            onIncrement: (isMax || isUnavailable) ? null : () {
                               cartController.increment(item.productId);
                             },
-                            onDecrement: () {
+                            onDecrement: isUnavailable ? null : () {
                               cartController.decrement(item.productId);
                             },
                             onRemove: () {
@@ -85,8 +105,12 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                         loading: () => const _CartItemSkeleton(),
                         error: (_, __) => _CartItemCard(
                           item: item,
+                          isPriceChanged: isPriceChanged,
+                          oldPrice: oldPrice,
+                          newPrice: newPrice,
+                          isUnavailable: isUnavailable,
                           onIncrement: null,
-                          onDecrement: () {
+                          onDecrement: isUnavailable ? null : () {
                             cartController.decrement(item.productId);
                           },
                           onRemove: () {
@@ -98,13 +122,15 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                   ),
                 ),
                 _CartSummary(
-                  pricing: pricing,
-                  onCheckout: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const CheckoutScreen()),
-                    );
-                  },
+                  pricing: displayedPricing,
+                  onCheckout: hasUnavailable
+                      ? null
+                      : () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const CheckoutScreen()),
+                          );
+                        },
                 ),
               ],
             ),
@@ -118,12 +144,20 @@ class _CartItemCard extends StatelessWidget {
     required this.onIncrement,
     required this.onDecrement,
     required this.onRemove,
+    this.isPriceChanged = false,
+    this.oldPrice,
+    this.newPrice,
+    this.isUnavailable = false,
   });
 
   final CartItem item;
   final VoidCallback? onIncrement;
-  final VoidCallback onDecrement;
+  final VoidCallback? onDecrement;
   final VoidCallback onRemove;
+  final bool isPriceChanged;
+  final double? oldPrice;
+  final double? newPrice;
+  final bool isUnavailable;
 
   @override
   Widget build(BuildContext context) {
@@ -136,7 +170,14 @@ class _CartItemCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.card,
           borderRadius: BorderRadius.circular(AppRadii.lg),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(
+            color: isUnavailable
+                ? AppColors.danger
+                : isPriceChanged
+                    ? AppColors.accent
+                    : AppColors.border,
+            width: (isUnavailable || isPriceChanged) ? 1.5 : 1.0,
+          ),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.03),
@@ -221,6 +262,36 @@ class _CartItemCard extends StatelessWidget {
                       ],
                     ],
                   ),
+                  if (isUnavailable) ...[
+                    const SizedBox(height: 8),
+                    const Text(
+                      "This product is no longer available.",
+                      style: TextStyle(
+                        color: AppColors.danger,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                  if (isPriceChanged && oldPrice != null && newPrice != null) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.warning_rounded, color: AppColors.accent, size: 14),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            "⚠ Price Updated (Old: ₹${_formatPrice(oldPrice!)}, New: ₹${_formatPrice(newPrice!)})",
+                            style: const TextStyle(
+                              color: AppColors.accent,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -313,7 +384,7 @@ class _QuantityStepper extends StatelessWidget {
 
   final int quantity;
   final VoidCallback? onIncrement;
-  final VoidCallback onDecrement;
+  final VoidCallback? onDecrement;
 
   @override
   Widget build(BuildContext context) {
@@ -384,11 +455,11 @@ class _QuantityButton extends StatelessWidget {
 class _CartSummary extends StatelessWidget {
   const _CartSummary({
     required this.pricing,
-    required this.onCheckout,
+    this.onCheckout,
   });
 
   final CartPricingSummary pricing;
-  final VoidCallback onCheckout;
+  final VoidCallback? onCheckout;
 
   @override
   Widget build(BuildContext context) {
@@ -778,4 +849,37 @@ class CartText {
   static const deliveryHint = 'Add items worth \u20B9699 for free delivery';
   static const saved = 'Saved';
   static const remove = 'Remove item';
+}
+class _SyncWarningBanner extends StatelessWidget {
+  const _SyncWarningBanner({required this.message});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.softOrange.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: AppColors.accent, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: AppColors.accent,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

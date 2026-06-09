@@ -657,6 +657,15 @@ class _AdminOrderCard extends StatelessWidget {
             ],
           ),
           children: [
+            if (effectiveStatus == 'Failed' && order.failureReason != null && order.failureReason!.isNotEmpty) ...[
+              _InfoBlock(
+                label: 'Failure Reason',
+                value: order.failureReason!,
+                icon: Icons.error_outline_rounded,
+                maxLines: 4,
+              ),
+              const SizedBox(height: 12),
+            ],
             _ExpandedInfoSection(
               title: 'Products',
               icon: Icons.shopping_bag_outlined,
@@ -706,7 +715,7 @@ class _AdminOrderCard extends StatelessWidget {
                   child: Text(status),
                 );
               }).toList(),
-              onChanged: (isUpdating || effectiveStatus == OrderStatus.cancelled)
+              onChanged: (isUpdating || effectiveStatus == OrderStatus.cancelled || effectiveStatus == OrderStatus.failed || effectiveStatus == 'Failed')
                   ? null
                   : (status) {
                       if (status == null || status == effectiveStatus) {
@@ -1285,6 +1294,11 @@ class _OrderStatusStyle {
         return _OrderStatusStyle(
           foreground: AppColors.danger,
           background: AppColors.danger.withValues(alpha: 0.1),
+        );
+      case OrderStatus.failed:
+        return _OrderStatusStyle(
+          foreground: AppColors.danger,
+          background: AppColors.danger.withValues(alpha: 0.15),
         );
     }
 

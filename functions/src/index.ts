@@ -30,7 +30,10 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
           productDocs.push(await transaction.get(ref) as any);
         }
 
-        // 2. Validate stock
+        // 2. Validate stock and prices
+        let expectedOriginalAmount = 0;
+        let expectedProductSavings = 0;
+
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
           const productDoc = productDocs[i];
@@ -38,6 +41,8 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
             throw new Error(`Product no longer available: ${item.name || item.productId}`);
           }
           const productData = productDoc.data();
+
+          // A. Stock Validation
           const trackStock = productData?.trackStock ?? (productData?.stockQuantity != null);
           if (trackStock) {
             const currentStock = productData?.stockQuantity || 0;
@@ -45,7 +50,129 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
               throw new Error(`Out of stock: ${item.name}`);
             }
           }
+
+          // B. Price Validation against current catalog data (Never trust client values)
+          const authoritativePrice = typeof productData?.price === "number" ? productData.price : 0;
+          const authoritativeDiscountPrice = typeof productData?.discountPrice === "number" ? productData.discountPrice : 0;
+
+          const basePrice = authoritativePrice;
+          const baseDiscountPrice = authoritativeDiscountPrice;
+
+          const effectivePrice = (baseDiscountPrice > 0 && baseDiscountPrice < basePrice)
+            ? baseDiscountPrice
+            : basePrice;
+
+          const clientPrice = typeof item.price === "number" ? item.price : 0;
+          const clientDiscountPrice = typeof item.discountPrice === "number" ? item.discountPrice : 0;
+          const clientLineTotal = typeof item.lineTotal === "number" ? item.lineTotal : 0;
+
+          const expectedLineTotal = Math.round(effectivePrice * item.quantity * 100) / 100;
+
+          // Perform checks for item price and discount price and line total
+          if (
+            Math.abs(clientPrice - authoritativePrice) > 0.001 ||
+            Math.abs(clientDiscountPrice - authoritativeDiscountPrice) > 0.001 ||
+            Math.abs(clientLineTotal - expectedLineTotal) > 0.001
+          ) {
+            logger.error("SECURITY ALERT: Price tampering detected on item", {
+              orderId: event.params.orderId,
+              userId: order.userId,
+              productId: item.productId,
+              clientPrice,
+              catalogPrice: authoritativePrice,
+              clientDiscountPrice,
+              catalogDiscountPrice: authoritativeDiscountPrice,
+              clientLineTotal,
+              expectedLineTotal
+            });
+            throw new Error("Product price has changed. Please place the order again.");
+          }
+
+          expectedOriginalAmount += effectivePrice * item.quantity;
+          expectedProductSavings += (basePrice - effectivePrice) * item.quantity;
         }
+
+        // Recalculate totals
+        expectedOriginalAmount = Math.round(expectedOriginalAmount * 100) / 100;
+        expectedProductSavings = Math.round(expectedProductSavings * 100) / 100;
+
+        // Calculate expected cartDiscount
+        let expectedCartDiscount = 0;
+        if (expectedOriginalAmount >= 4000) {
+          expectedCartDiscount = 150;
+        } else if (expectedOriginalAmount >= 3000) {
+          expectedCartDiscount = 100;
+        } else if (expectedOriginalAmount >= 2000) {
+          expectedCartDiscount = 50;
+        }
+
+        // Calculate expected deliveryFee
+        const expectedDeliveryFee = expectedOriginalAmount >= 699 ? 0 : 50;
+
+        // Calculate expected final totals
+        const expectedTotalAmount = Math.round((expectedOriginalAmount - expectedCartDiscount + expectedDeliveryFee) * 100) / 100;
+        const expectedTotalSavings = Math.round((expectedProductSavings + expectedCartDiscount) * 100) / 100;
+
+        // Compare against client values
+        const clientOriginalAmount = typeof order.originalAmount === "number" ? order.originalAmount : 0;
+        const clientSubtotal = typeof order.subtotal === "number" ? order.subtotal : 0;
+        const clientTotalAmount = typeof order.totalAmount === "number" ? order.totalAmount : 0;
+        const clientTotal = typeof order.total === "number" ? order.total : 0;
+        const clientTotalSavings = typeof order.totalSavings === "number" ? order.totalSavings : 0;
+        const clientCartDiscount = typeof order.cartDiscount === "number" ? order.cartDiscount : 0;
+        const clientDeliveryFee = typeof order.deliveryFee === "number" ? order.deliveryFee : 0;
+
+        let orderLevelMismatch = false;
+
+        if (order.originalAmount !== undefined && Math.abs(clientOriginalAmount - expectedOriginalAmount) > 0.001) {
+          orderLevelMismatch = true;
+        }
+        if (order.subtotal !== undefined && Math.abs(clientSubtotal - expectedOriginalAmount) > 0.001) {
+          orderLevelMismatch = true;
+        }
+        if (order.totalAmount !== undefined && Math.abs(clientTotalAmount - expectedTotalAmount) > 0.001) {
+          orderLevelMismatch = true;
+        }
+        if (order.total !== undefined && Math.abs(clientTotal - expectedTotalAmount) > 0.001) {
+          orderLevelMismatch = true;
+        }
+        if (order.totalSavings !== undefined && Math.abs(clientTotalSavings - expectedTotalSavings) > 0.001) {
+          orderLevelMismatch = true;
+        }
+        if (order.cartDiscount !== undefined && Math.abs(clientCartDiscount - expectedCartDiscount) > 0.001) {
+          orderLevelMismatch = true;
+        }
+        if (order.deliveryFee !== undefined && Math.abs(clientDeliveryFee - expectedDeliveryFee) > 0.001) {
+          orderLevelMismatch = true;
+        }
+
+        // Additional aggregated assertions as fallback checks
+        const clientOriginalVal = Math.round((order.originalAmount || order.subtotal || 0) * 100) / 100;
+        const clientTotalVal = Math.round((order.totalAmount || order.total || 0) * 100) / 100;
+        const clientSavingsVal = Math.round((order.totalSavings || 0) * 100) / 100;
+        const clientDiscountVal = Math.round((order.cartDiscount || 0) * 100) / 100;
+        const clientDeliveryVal = Math.round((order.deliveryFee || 0) * 100) / 100;
+
+        if (
+          Math.abs(clientOriginalVal - expectedOriginalAmount) > 0.001 ||
+          Math.abs(clientTotalVal - expectedTotalAmount) > 0.001 ||
+          Math.abs(clientSavingsVal - expectedTotalSavings) > 0.001 ||
+          Math.abs(clientDiscountVal - expectedCartDiscount) > 0.001 ||
+          Math.abs(clientDeliveryVal - expectedDeliveryFee) > 0.001 ||
+          orderLevelMismatch
+        ) {
+          logger.error("SECURITY ALERT: Order totals mismatch or tampering detected", {
+            orderId: event.params.orderId,
+            userId: order.userId,
+            clientOriginalAmount, clientSubtotal, expectedOriginalAmount,
+            clientTotalAmount, clientTotal, expectedTotalAmount,
+            clientTotalSavings, expectedTotalSavings,
+            clientCartDiscount, expectedCartDiscount,
+            clientDeliveryFee, expectedDeliveryFee
+          });
+          throw new Error("Product price has changed. Please place the order again.");
+        }
+
 
         // 3. Read counter and generate official ID
         const counterRef = db.collection("counters").doc("orders");
@@ -193,36 +320,46 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
     }
 
     try {
+      const wasStockDeducted = [
+        "Placed",
+        "Order Confirmed",
+        "Packed",
+        "Shipped",
+        "Out for Delivery"
+      ].includes(before.status);
+
       await db.runTransaction(async (transaction) => {
         const orderRef = db.collection("orders").doc(event.params.orderId);
 
-        // 1. Read products to restore stock
-        const items = after.items || [];
-        const productRefs = items.map((item: any) => db.collection("products").doc(item.productId));
-        const productDocs: admin.firestore.DocumentSnapshot[] = [];
-        for (const ref of productRefs) {
-          productDocs.push(await transaction.get(ref) as any);
-        }
+        if (wasStockDeducted) {
+          // 1. Read products to restore stock
+          const items = after.items || [];
+          const productRefs = items.map((item: any) => db.collection("products").doc(item.productId));
+          const productDocs: admin.firestore.DocumentSnapshot[] = [];
+          for (const ref of productRefs) {
+            productDocs.push(await transaction.get(ref) as any);
+          }
 
-        // 2. Restore stock
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
-          const productDoc = productDocs[i];
-          if (productDoc.exists) {
-            const productData = productDoc.data();
-            const trackStock = productData?.trackStock ?? (productData?.stockQuantity != null);
-            if (trackStock) {
-              const currentStock = productData?.stockQuantity || 0;
-              const nextQuantity = currentStock + item.quantity;
+          // 2. Restore stock
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const productDoc = productDocs[i];
+            if (productDoc.exists) {
+              const productData = productDoc.data();
+              const trackStock = productData?.trackStock ?? (productData?.stockQuantity != null);
+              if (trackStock) {
+                const currentStock = productData?.stockQuantity || 0;
+                const nextQuantity = currentStock + item.quantity;
 
-              const updateData: any = {
-                stockQuantity: admin.firestore.FieldValue.increment(item.quantity),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-              };
-              if (nextQuantity > 0) {
-                updateData.isAvailable = true;
+                const updateData: any = {
+                  stockQuantity: admin.firestore.FieldValue.increment(item.quantity),
+                  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                };
+                if (nextQuantity > 0) {
+                  updateData.isAvailable = true;
+                }
+                transaction.update(productRefs[i], updateData);
               }
-              transaction.update(productRefs[i], updateData);
             }
           }
         }
@@ -233,7 +370,9 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
       });
-      logger.info("processOrderCancellation: stock restored and order cancelled", { functionName: "processOrderCancellation", orderId: event.params.orderId, itemCount: (after.items || []).length, operation: "stock_restore_cancel" });
+
+      const operationName = wasStockDeducted ? "stock_restore_cancel" : "status_only_cancel";
+      logger.info(`processOrderCancellation: order cancelled successfully (${operationName})`, { functionName: "processOrderCancellation", orderId: event.params.orderId, itemCount: (after.items || []).length, operation: operationName });
     } catch (error: any) {
       logger.error("processOrderCancellation: transaction failed", { functionName: "processOrderCancellation", orderId: event.params.orderId, beforeStatus: before.status, afterStatus: after.status, operation: "cancellation_transaction", error: error?.message });
     }

@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/app_error_handler.dart';
-import '../../core/notifications/notification_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/phone_number_normalizer.dart';
 import '../../domain/entities/cart_item.dart';
@@ -22,6 +21,8 @@ import '../widgets/app_cached_network_image.dart';
 import '../widgets/app_state_widgets.dart';
 import 'address_screen.dart';
 import 'order_success_screen.dart';
+import '../../core/errors/repository_exception.dart';
+import '../navigation/customer_navigation_scope.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
@@ -39,6 +40,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   bool hasSeededProfile = false;
   bool hasLoggedBeginCheckout = false;
   bool isEditingDetails = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(cartSyncProvider.notifier).syncCart();
+    });
+  }
 
   @override
   void dispose() {
@@ -84,10 +93,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       pincodeController.text = _extractPincode(seedAddress);
     }
 
-    final cartItems = ref.watch(cartItemsProvider);
-    final pricing = ref.watch(cartPricingSummaryProvider);
+    final syncState = ref.watch(cartSyncProvider);
+    final List<CartItem> cartItems = syncState.recalculatedItems ?? ref.watch(cartItemsProvider);
+    final CartPricingSummary pricing = syncState.recalculatedPricing ?? ref.watch(cartPricingSummaryProvider);
     final orderCreationState = ref.watch(orderCreationControllerProvider);
     final isLoading = orderCreationState.isLoading;
+    final hasUnavailable = syncState.unavailableProductIds.isNotEmpty;
 
     if (!hasLoggedBeginCheckout && cartItems.isNotEmpty) {
       hasLoggedBeginCheckout = true;
@@ -135,6 +146,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     child: ListView(
                       padding: const EdgeInsets.all(12),
                       children: [
+                        if (syncState.syncMessage != null) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _SyncWarningBanner(message: syncState.syncMessage!),
+                          ),
+                        ],
                         if (storeClosedMessage != null) ...[
                           Container(
                             width: double.infinity,
@@ -267,13 +284,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     pricing: pricing,
                     isLoading: isLoading,
                     isStoreClosed: isStoreClosed,
-                    onPlaceOrder: () {
-                      _placeOrder(
-                        userId: session.uid,
-                        cartItems: cartItems,
-                        pricing: pricing,
-                      );
-                    },
+                    onPlaceOrder: hasUnavailable
+                        ? null
+                        : () {
+                            _placeOrder(
+                              userId: session.uid,
+                              cartItems: cartItems,
+                              pricing: pricing,
+                            );
+                          },
                   ),
                 ],
               ),
@@ -396,6 +415,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       _logCheckoutOrder('Stock validation check failed dynamically: $e');
     }
 
+    if (!mounted) return;
+
     final normalizedPhone = PhoneNumberNormalizer.toIndianLocalNumber(
       phoneController.text,
     );
@@ -433,11 +454,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               );
       _logCheckoutOrder('Order created successfully orderId=$orderId.');
 
-      // 1. Fetch your user ID from your session state
-      final uid = userId; // Adjust variable name based on your auth structure
-
-      // 2. Trigger a fresh async reload on the orders screen provider 
-      // This forces the app to pull the server-calculated official ID immediately
+      final uid = userId;
       ref.invalidate(userOrderListProvider(uid));
       await ref.read(userOrderListProvider(uid).notifier).loadInitial();
 
@@ -458,9 +475,35 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         '_placeOrder: order creation FAILED.',
         error: error,
       );
+
       if (!mounted) return;
-      // In debug builds show the raw error code so we can diagnose without
-      // reading logcat. In release builds show the friendly fallback only.
+
+      final isTimeout = error is RepositoryException && error.code == 'timeout';
+      if (isTimeout) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogCtx) => AlertDialog(
+            title: const Text('Order Still Processing'),
+            content: const Text(
+              'Your order processing is taking longer than expected. '
+              'The process is still running in the background. '
+              'We are redirecting you to your Orders history to check status.'
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogCtx).pop();
+                  CustomerNavigationScope.openOrders(context);
+                },
+                child: const Text('Go to Orders'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
       final String message;
       if (kDebugMode) {
         message = AppErrorHandler.messageFor(
@@ -483,6 +526,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             duration: const Duration(seconds: 8),
           ),
         );
+
+      ref.read(cartSyncProvider.notifier).syncCart();
     }
   }
 
@@ -662,13 +707,14 @@ class _ThumbnailErrorPlaceholder extends StatelessWidget {
   }
 }
 
-class _AllItemsBottomSheet extends StatelessWidget {
+class _AllItemsBottomSheet extends ConsumerWidget {
   const _AllItemsBottomSheet({required this.items});
 
   final List<CartItem> items;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final syncState = ref.watch(cartSyncProvider);
     final mediaQuery = MediaQuery.of(context);
     final maxHeight = mediaQuery.size.height * 0.65; // ~65% screen height
 
@@ -735,6 +781,11 @@ class _AllItemsBottomSheet extends StatelessWidget {
                   ),
                   itemBuilder: (context, index) {
                     final item = items[index];
+                    final isPriceChanged = syncState.priceChangedProductIds.contains(item.productId);
+                    final isUnavailable = syncState.unavailableProductIds.contains(item.productId);
+                    final oldPrice = syncState.oldPrices[item.productId];
+                    final newPrice = syncState.newPrices[item.productId];
+
                     return Row(
                       children: [
                         Container(
@@ -743,7 +794,14 @@ class _AllItemsBottomSheet extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: AppColors.border),
+                            border: Border.all(
+                              color: isUnavailable
+                                  ? AppColors.danger
+                                  : isPriceChanged
+                                      ? AppColors.accent
+                                      : AppColors.border,
+                              width: (isUnavailable || isPriceChanged) ? 1.5 : 1.0,
+                            ),
                           ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(5),
@@ -764,13 +822,36 @@ class _AllItemsBottomSheet extends StatelessWidget {
                                 item.name,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w800,
-                                  color: AppColors.text,
+                                  color: isUnavailable ? AppColors.danger : AppColors.text,
+                                  decoration: isUnavailable ? TextDecoration.lineThrough : null,
                                 ),
                               ),
-                              if (item.unit.isNotEmpty) ...[
+                              if (isUnavailable) ...[
+                                const SizedBox(height: 2),
+                                const Text(
+                                  "This product is no longer available.",
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.danger,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                              if (isPriceChanged && oldPrice != null && newPrice != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  "⚠ Price Updated (Old: ₹${_formatPrice(oldPrice)}, New: ₹${_formatPrice(newPrice)})",
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.accent,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                              if (!isUnavailable && item.unit.isNotEmpty) ...[
                                 const SizedBox(height: 2),
                                 Text(
                                   item.unit,
@@ -1185,13 +1266,13 @@ class _CheckoutSummary extends StatefulWidget {
   const _CheckoutSummary({
     required this.pricing,
     required this.isLoading,
-    required this.onPlaceOrder,
+    this.onPlaceOrder,
     this.isStoreClosed = false,
   });
 
   final CartPricingSummary pricing;
   final bool isLoading;
-  final VoidCallback onPlaceOrder;
+  final VoidCallback? onPlaceOrder;
   final bool isStoreClosed;
 
   @override
@@ -1367,13 +1448,23 @@ class _CheckoutSummaryState extends State<_CheckoutSummary> {
               ),
               onPressed: widget.isLoading || widget.isStoreClosed ? null : widget.onPlaceOrder,
               child: widget.isLoading
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
+                  ? const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Text(
+                          'Processing Order...',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white),
+                        ),
+                      ],
                     )
                   : Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -1750,3 +1841,39 @@ void _logCheckoutOrder(
   if (!_checkoutDebugLoggingEnabled) return;
   developer.log(message, name: _checkoutOrderLogName, error: error);
 }
+
+
+class _SyncWarningBanner extends StatelessWidget {
+  const _SyncWarningBanner({required this.message});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.softOrange.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: AppColors.accent, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: AppColors.accent,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+

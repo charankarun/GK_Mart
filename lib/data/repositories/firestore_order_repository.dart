@@ -51,7 +51,10 @@ class FirestoreOrderRepository implements OrderRepository {
             .orderBy('timestamp', descending: true)
             .limit(safeLimit)
             .snapshots()
-            .map((snapshot) => snapshot.docs.map(_fromDocument).toList());
+            .map((snapshot) => snapshot.docs
+                .map(_fromDocument)
+                .where((order) => order.status != 'Failed')
+                .toList());
       },
     );
   }
@@ -111,7 +114,13 @@ class FirestoreOrderRepository implements OrderRepository {
         query = await _startAfterOrderCursor(query: query, cursor: cursor);
 
         final snapshot = await query.get().timeout(AppDurations.networkTimeout);
-        return _pageFromSnapshot(snapshot, safeLimit);
+        final page = _pageFromSnapshot(snapshot, safeLimit);
+        final filteredOrders = page.orders.where((order) => order.status != 'Failed').toList();
+        return OrderPage(
+          orders: filteredOrders,
+          nextCursor: page.nextCursor,
+          hasMore: page.hasMore,
+        );
       },
     );
   }
@@ -699,69 +708,6 @@ class FirestoreOrderRepository implements OrderRepository {
     return limit > _maxPageLimit ? _maxPageLimit : limit;
   }
 
-  OrderAnalytics _analyticsFromOrdersSnapshot(
-    QuerySnapshot<Map<String, dynamic>> snapshot, {
-    required DateTime selectedDate,
-    required DateTime nextDate,
-  }) {
-    var totalOrders = 0;
-    var pendingOrders = 0;
-    var deliveredOrders = 0;
-    var selectedDateOrders = 0;
-    var revenue = 0.0;
-    var selectedDateRevenue = 0.0;
-    var missingDateCount = 0;
-    var missingRevenueCount = 0;
-
-    for (final doc in snapshot.docs) {
-      totalOrders += 1;
-      final data = doc.data();
-      final status = OrderStatus.normalize(data['status']?.toString());
-      if (status == OrderStatus.delivered) {
-        deliveredOrders += 1;
-      } else if (status == OrderStatus.placed ||
-          status == OrderStatus.packed ||
-          status == OrderStatus.outForDelivery) {
-        pendingOrders += 1;
-      }
-
-      final amount = _readOrderRevenue(data);
-      if (amount == null) {
-        missingRevenueCount += 1;
-      } else {
-        revenue += amount;
-      }
-
-      final orderDate = _readOrderDate(data);
-      if (orderDate == null) {
-        missingDateCount += 1;
-        continue;
-      }
-
-      if (!_dateOnly(orderDate).isBefore(selectedDate) &&
-          orderDate.isBefore(nextDate)) {
-        selectedDateOrders += 1;
-        selectedDateRevenue += amount ?? 0;
-      }
-    }
-
-    if (missingDateCount > 0 || missingRevenueCount > 0) {
-      _dashboardLog(
-        'Order analytics schema gaps missingDate=$missingDateCount '
-        'missingRevenue=$missingRevenueCount',
-      );
-    }
-
-    return OrderAnalytics(
-      totalOrders: totalOrders,
-      revenue: revenue,
-      pendingOrders: pendingOrders,
-      deliveredOrders: deliveredOrders,
-      selectedDate: selectedDate,
-      selectedDateOrders: selectedDateOrders,
-      selectedDateRevenue: selectedDateRevenue,
-    );
-  }
 
   static double? _readOrderRevenue(Map<String, dynamic> data) {
     for (final field in _revenueFields) {
@@ -779,13 +725,6 @@ class FirestoreOrderRepository implements OrderRepository {
     return double.tryParse(text);
   }
 
-  static DateTime? _readOrderDate(Map<String, dynamic> data) {
-    for (final field in _dateFields) {
-      final date = readDateTime(data[field]);
-      if (date != null) return date;
-    }
-    return null;
-  }
 
   Order _fromDocument(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
@@ -813,6 +752,7 @@ class FirestoreOrderRepository implements OrderRepository {
       status: OrderStatus.normalize(data['status']?.toString()),
       paymentMethod: readString(data, 'paymentMethod', fallback: 'COD'),
       createdAt: readDateTime(data['createdAt'] ?? data['timestamp']),
+      failureReason: readString(data, 'failureReason'),
     );
   }
 

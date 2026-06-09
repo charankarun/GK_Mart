@@ -60,6 +60,217 @@ final cartPricingSummaryProvider = Provider<CartPricingSummary>((ref) {
   return CartPricingSummary.fromCartItems(ref.watch(cartItemsProvider));
 });
 
+class CartSyncState {
+  const CartSyncState({
+    this.catalogProducts = const {},
+    this.priceChangedProductIds = const {},
+    this.oldPrices = const {},
+    this.newPrices = const {},
+    this.unavailableProductIds = const {},
+    this.isSyncing = false,
+    this.syncMessage,
+    this.recalculatedPricing,
+    this.recalculatedItems,
+  });
+
+  final Map<String, Product> catalogProducts;
+  final Set<String> priceChangedProductIds;
+  final Map<String, double> oldPrices;
+  final Map<String, double> newPrices;
+  final Set<String> unavailableProductIds;
+  final bool isSyncing;
+  final String? syncMessage;
+  final CartPricingSummary? recalculatedPricing;
+  final List<CartItem>? recalculatedItems;
+
+  CartSyncState copyWith({
+    Map<String, Product>? catalogProducts,
+    Set<String>? priceChangedProductIds,
+    Map<String, double>? oldPrices,
+    Map<String, double>? newPrices,
+    Set<String>? unavailableProductIds,
+    bool? isSyncing,
+    String? syncMessage,
+    CartPricingSummary? recalculatedPricing,
+    List<CartItem>? recalculatedItems,
+  }) {
+    return CartSyncState(
+      catalogProducts: catalogProducts ?? this.catalogProducts,
+      priceChangedProductIds: priceChangedProductIds ?? this.priceChangedProductIds,
+      oldPrices: oldPrices ?? this.oldPrices,
+      newPrices: newPrices ?? this.newPrices,
+      unavailableProductIds: unavailableProductIds ?? this.unavailableProductIds,
+      isSyncing: isSyncing ?? this.isSyncing,
+      syncMessage: syncMessage,
+      recalculatedPricing: recalculatedPricing ?? this.recalculatedPricing,
+      recalculatedItems: recalculatedItems ?? this.recalculatedItems,
+    );
+  }
+}
+
+class CartSyncNotifier extends StateNotifier<CartSyncState> {
+  CartSyncNotifier(this._ref) : super(const CartSyncState()) {
+    _ref.listen<List<CartItem>>(
+      cartControllerProvider,
+      (previous, next) {
+        if (state.catalogProducts.isNotEmpty) {
+          updateQuantitiesLocal();
+        }
+      },
+      fireImmediately: false,
+    );
+  }
+
+  final Ref _ref;
+
+  Future<void> syncCart() async {
+    final session = _ref.read(currentSessionProvider);
+    if (session == null) return;
+
+    final rawItems = _ref.read(cartControllerProvider);
+    if (rawItems.isEmpty) {
+      state = const CartSyncState();
+      return;
+    }
+
+    state = state.copyWith(isSyncing: true);
+
+    try {
+      final productIds = rawItems.map((item) => item.productId).toList();
+      final latestProducts = await _ref.read(productRepositoryProvider).fetchProductsByIds(productIds);
+      final latestProductsMap = {for (final p in latestProducts) p.id: p};
+
+      final priceChanged = <String>{};
+      final oldPrices = <String, double>{};
+      final newPrices = <String, double>{};
+      final unavailable = <String>{};
+      final recalculatedItems = <CartItem>[];
+      bool pricesUpdated = false;
+
+      for (final item in rawItems) {
+        final product = latestProductsMap[item.productId];
+        if (product == null || !product.isAvailable || (product.trackStock && (product.stockQuantity ?? 0) <= 0)) {
+          unavailable.add(item.productId);
+          recalculatedItems.add(item);
+        } else if (product.trackStock && (product.stockQuantity ?? 0) < item.quantity) {
+          unavailable.add(item.productId);
+          recalculatedItems.add(item);
+        } else {
+          final priceDiff = (item.price - product.price).abs() > 0.001 ||
+                            (item.discountPrice - product.discountPrice).abs() > 0.001;
+          if (priceDiff) {
+            priceChanged.add(item.productId);
+            oldPrices[item.productId] = item.effectivePrice;
+
+            final updatedItem = item.copyWith(
+              price: product.price,
+              discountPrice: product.discountPrice,
+              name: product.name,
+              unit: product.unit,
+              imageUrl: product.imageUrl,
+            );
+            newPrices[item.productId] = updatedItem.effectivePrice;
+            recalculatedItems.add(updatedItem);
+            pricesUpdated = true;
+          } else {
+            recalculatedItems.add(item);
+          }
+        }
+      }
+
+      final recalculatedPricing = CartPricingSummary.fromCartItems(recalculatedItems);
+
+      state = CartSyncState(
+        catalogProducts: latestProductsMap,
+        priceChangedProductIds: priceChanged,
+        oldPrices: oldPrices,
+        newPrices: newPrices,
+        unavailableProductIds: unavailable,
+        isSyncing: false,
+        syncMessage: pricesUpdated
+            ? "Some product prices have changed.\nPlease review your cart before checkout."
+            : null,
+        recalculatedPricing: recalculatedPricing,
+        recalculatedItems: recalculatedItems,
+      );
+    } catch (e, stack) {
+      developer.log("Error syncing cart catalog", error: e, stackTrace: stack);
+      state = state.copyWith(isSyncing: false);
+    }
+  }
+
+  void updateQuantitiesLocal() {
+    final rawItems = _ref.read(cartControllerProvider);
+    if (rawItems.isEmpty) {
+      state = const CartSyncState();
+      return;
+    }
+    if (state.catalogProducts.isEmpty) return;
+
+    final latestProductsMap = state.catalogProducts;
+    final priceChanged = <String>{};
+    final oldPrices = <String, double>{};
+    final newPrices = <String, double>{};
+    final unavailable = <String>{};
+    final recalculatedItems = <CartItem>[];
+    bool pricesUpdated = false;
+
+    for (final item in rawItems) {
+      final product = latestProductsMap[item.productId];
+      if (product == null || !product.isAvailable || (product.trackStock && (product.stockQuantity ?? 0) <= 0)) {
+        unavailable.add(item.productId);
+        recalculatedItems.add(item);
+      } else if (product.trackStock && (product.stockQuantity ?? 0) < item.quantity) {
+        unavailable.add(item.productId);
+        recalculatedItems.add(item);
+      } else {
+        final priceDiff = (item.price - product.price).abs() > 0.001 ||
+                          (item.discountPrice - product.discountPrice).abs() > 0.001;
+        if (priceDiff) {
+          priceChanged.add(item.productId);
+          oldPrices[item.productId] = item.effectivePrice;
+
+          final updatedItem = item.copyWith(
+            price: product.price,
+            discountPrice: product.discountPrice,
+            name: product.name,
+            unit: product.unit,
+            imageUrl: product.imageUrl,
+          );
+          newPrices[item.productId] = updatedItem.effectivePrice;
+          recalculatedItems.add(updatedItem);
+          pricesUpdated = true;
+        } else {
+          recalculatedItems.add(item);
+        }
+      }
+    }
+
+    final recalculatedPricing = CartPricingSummary.fromCartItems(recalculatedItems);
+
+    state = state.copyWith(
+      priceChangedProductIds: priceChanged,
+      oldPrices: oldPrices,
+      newPrices: newPrices,
+      unavailableProductIds: unavailable,
+      syncMessage: pricesUpdated
+          ? "Some product prices have changed.\nPlease review your cart before checkout."
+          : null,
+      recalculatedPricing: recalculatedPricing,
+      recalculatedItems: recalculatedItems,
+    );
+  }
+
+  void clearMessage() {
+    state = state.copyWith(syncMessage: null);
+  }
+}
+
+final cartSyncProvider = StateNotifierProvider<CartSyncNotifier, CartSyncState>((ref) {
+  return CartSyncNotifier(ref);
+});
+
+
 class CartController extends StateNotifier<List<CartItem>> {
   CartController(this._ref) : super(const <CartItem>[]) {
     _sessionSubscription = _ref.listen<AuthSession?>(

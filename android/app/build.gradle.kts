@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -6,8 +8,14 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
 android {
-    namespace = "com.example.supermarket_app"
+    namespace = "com.gkmart.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -33,11 +41,36 @@ android {
         versionName = flutter.versionName
     }
 
+    val hasReleaseSigning = keystoreProperties.containsKey("keyAlias") &&
+            keystoreProperties.containsKey("keyPassword") &&
+            keystoreProperties.containsKey("storeFile") &&
+            keystoreProperties.containsKey("storePassword") &&
+            keystoreProperties.getProperty("keyAlias")?.toString()?.startsWith("YOUR_") != true
+
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties.getProperty("keyAlias")
+            keyPassword = keystoreProperties.getProperty("keyPassword")
+            val storeFilePath = keystoreProperties.getProperty("storeFile")
+            storeFile = if (storeFilePath != null) {
+                val f = file(storeFilePath)
+                if (f.exists()) f else rootProject.file(storeFilePath)
+            } else {
+                null
+            }
+            storePassword = keystoreProperties.getProperty("storePassword")
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

@@ -158,34 +158,67 @@ class _OrderCard extends StatelessWidget {
                           .doc(order.id)
                           .snapshots(),
                       builder: (context, snapshot) {
-                        final serverOrderId = snapshot.data?.data()?['orderId'] as String?;
-                        final isGKId = order.orderId != null && order.orderId!.startsWith('GK');
+                        final docData = snapshot.data?.data();
+                        final serverOrderId = docData?['orderId'] as String?;
+                        final serverStatus = docData?['status'] as String? ?? order.status;
 
-                        if (serverOrderId == null && !isGKId) {
-                          return const Row(
-                            children: [
-                              Text(
-                                'Order #',
-                                style: TextStyle(
-                                  color: AppColors.text,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w900,
-                                ),
+                        final isGK = (serverOrderId != null && serverOrderId.startsWith('GK')) ||
+                                     (order.orderId != null && order.orderId!.startsWith('GK'));
+
+                        if (!isGK) {
+                          if (serverStatus == 'Failed') {
+                            return const Text(
+                              'Validation Failed',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppColors.danger,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
                               ),
-                              SizedBox(width: 6),
-                              SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppColors.primary,
+                            );
+                          }
+
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return const Row(
+                              children: [
+                                Text(
+                                  'Order #',
+                                  style: TextStyle(
+                                    color: AppColors.text,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w900,
+                                  ),
                                 ),
-                              ),
-                            ],
+                                SizedBox(width: 6),
+                                SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+
+                          return const Text(
+                            'Order Not Created',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.mutedText,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                            ),
                           );
                         }
 
-                        final displayVal = serverOrderId ?? order.displayId;
+                        final displayVal = (serverOrderId != null && serverOrderId.startsWith('GK'))
+                            ? serverOrderId
+                            : (order.orderId != null && order.orderId!.startsWith('GK') ? order.orderId! : '');
+
                         return Text(
                           'Order #$displayVal',
                           maxLines: 1,
