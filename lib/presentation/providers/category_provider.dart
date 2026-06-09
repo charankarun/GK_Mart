@@ -3,10 +3,12 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
+import '../../core/errors/repository_exception.dart';
 import '../../domain/entities/category.dart';
 import '../../domain/entities/category_image_upload.dart';
 import '../../domain/entities/category_page.dart';
 import 'repository_providers.dart';
+import 'role_provider.dart';
 
 final categoriesStreamProvider = StreamProvider<List<Category>>((ref) {
   return ref.watch(categoryRepositoryProvider).watchCategories();
@@ -16,31 +18,52 @@ final categoriesProvider = categoriesStreamProvider;
 
 final adminCategoryListProvider = StateNotifierProvider.autoDispose<
     AdminCategoryListController, AsyncValue<CategoryListState>>((ref) {
+  final permissions = ref.watch(userPermissionsProvider);
+  if (!permissions.canManageCategories) {
+    throw const RepositoryException('Access denied. Insufficient permissions.');
+  }
   return AdminCategoryListController(ref)..loadInitial();
 });
 
 final adminCategoryControllerProvider =
     StateNotifierProvider<AdminCategoryController, AsyncValue<void>>((ref) {
+  final permissions = ref.watch(userPermissionsProvider);
+  if (!permissions.canManageCategories) {
+    throw const RepositoryException('Access denied. Insufficient permissions.');
+  }
   return AdminCategoryController(ref);
 });
 
 final addCategoryProvider = Provider<Future<void> Function(Category)>((ref) {
   return (category) {
+    final permissions = ref.read(userPermissionsProvider);
+    if (!permissions.canManageCategories) {
+      throw const RepositoryException('Access denied. Insufficient permissions.');
+    }
     return ref.read(categoryRepositoryProvider).addCategory(category);
   };
 });
 
 final updateCategoryProvider = Provider<Future<void> Function(Category)>((ref) {
   return (category) {
+    final permissions = ref.read(userPermissionsProvider);
+    if (!permissions.canManageCategories) {
+      throw const RepositoryException('Access denied. Insufficient permissions.');
+    }
     return ref.read(categoryRepositoryProvider).updateCategory(category);
   };
 });
 
 final deleteCategoryProvider = Provider<Future<void> Function(String)>((ref) {
   return (categoryId) {
+    final permissions = ref.read(userPermissionsProvider);
+    if (!permissions.canManageCategories) {
+      throw const RepositoryException('Access denied. Insufficient permissions.');
+    }
     return ref.read(categoryRepositoryProvider).deleteCategory(categoryId);
   };
 });
+
 
 class AdminCategoryController extends StateNotifier<AsyncValue<void>> {
   AdminCategoryController(this._ref) : super(const AsyncData(null));

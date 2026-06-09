@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/app_user.dart';
 import '../../domain/entities/auth_session.dart';
 import 'repository_providers.dart';
+import 'role_provider.dart';
 
 final authStateProvider = StreamProvider<AuthSession?>((ref) {
   return ref.watch(authRepositoryProvider).authStateChanges();
@@ -23,10 +24,9 @@ final currentUserProfileProvider = StreamProvider<AppUser?>((ref) {
 });
 
 final isAdminProvider = StreamProvider<bool>((ref) {
-  final session = ref.watch(currentSessionProvider);
-  if (session == null) return Stream.value(false);
-
-  return ref.watch(adminRepositoryProvider).watchIsAdmin(session);
+  final permissions = ref.watch(userPermissionsProvider);
+  return Stream.value(permissions.isAdministrative);
 });
 
 final isCurrentUserAdminProvider = isAdminProvider;
+

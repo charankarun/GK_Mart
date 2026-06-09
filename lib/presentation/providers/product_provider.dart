@@ -5,14 +5,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/errors/repository_exception.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/product_image_upload.dart';
 import '../../domain/entities/product_page.dart';
 import '../../domain/entities/product_stats.dart';
 import 'repository_providers.dart';
+import 'role_provider.dart';
 
 final dashboardInventoryStatsProvider =
     FutureProvider.autoDispose<ProductStats>((ref) async {
+  final permissions = ref.watch(userPermissionsProvider);
+  if (!permissions.canManageInventory) {
+    throw const RepositoryException('Access denied. Insufficient permissions.');
+  }
   _dashboardLog(
     'Inventory query start via fetchInventoryStats()',
   );
@@ -35,8 +41,13 @@ final dashboardInventoryStatsProvider =
 
 final adminProductListProvider = StateNotifierProvider.autoDispose<
     AdminProductListController, AsyncValue<AdminProductListState>>((ref) {
+  final permissions = ref.watch(userPermissionsProvider);
+  if (!permissions.canManageProducts) {
+    throw const RepositoryException('Access denied. Insufficient permissions.');
+  }
   return AdminProductListController(ref)..loadInitial();
 });
+
 
 class AdminProductListController
     extends StateNotifier<AsyncValue<AdminProductListState>> {

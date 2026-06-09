@@ -10,8 +10,10 @@ import '../../../domain/entities/product_stats.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/order_providers.dart';
 import '../../providers/product_provider.dart';
+import '../../providers/role_provider.dart';
 import '../../providers/store_providers.dart';
 import '../../widgets/app_state_widgets.dart';
+import 'access_denied_screen.dart';
 import 'admin_orders_screen.dart';
 import 'store_settings_screen.dart';
 
@@ -37,36 +39,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isAdminAsync = ref.watch(isAdminProvider);
-    final isAdmin = isAdminAsync.maybeWhen(
-      data: (value) => value,
-      orElse: () => false,
-    );
-
-    if (!isAdmin) {
-      if (isAdminAsync.hasError) {
-        return Scaffold(
-          appBar: AppBar(title: const Text(AdminDashboardText.title)),
-          body: AppRetryState(
-            icon: Icons.admin_panel_settings_outlined,
-            title: AdminDashboardText.adminVerificationError,
-            message: AppErrorHandler.messageFor(
-              isAdminAsync.error,
-              fallback: AdminDashboardText.adminVerificationErrorSubtitle,
-            ),
-            onRetry: () => ref.invalidate(isAdminProvider),
-          ),
-        );
-      }
-
-      return Scaffold(
-        appBar: AppBar(title: const Text(AdminDashboardText.title)),
-        body: Center(
-          child: isAdminAsync.isLoading
-              ? const CircularProgressIndicator()
-              : const Text(AdminDashboardText.adminAccessRequired),
-        ),
-      );
+    final permissions = ref.watch(userPermissionsProvider);
+    if (!permissions.canViewAnalytics) {
+      return const AccessDeniedScreen();
     }
 
     final analyticsAsync = ref.watch(orderAnalyticsProvider(_selectedDate));
@@ -78,20 +53,22 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
       appBar: AppBar(
         title: const Text(AdminDashboardText.title),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.storefront_outlined),
-            tooltip: 'Store Settings',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const StoreSettingsScreen(),
-                ),
-              );
-            },
-          ),
+          if (permissions.canManageStoreSettings)
+            IconButton(
+              icon: const Icon(Icons.storefront_outlined),
+              tooltip: 'Store Settings',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const StoreSettingsScreen(),
+                  ),
+                );
+              },
+            ),
         ],
       ),
+
       body: analyticsAsync.when(
         data: (analytics) {
           final stats = _OrderDashboardStats.fromAnalytics(analytics);

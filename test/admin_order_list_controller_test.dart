@@ -12,6 +12,9 @@ import 'package:supermarket_app/presentation/providers/order_providers.dart';
 import 'package:supermarket_app/presentation/providers/product_provider.dart';
 import 'package:supermarket_app/presentation/providers/repository_providers.dart';
 import 'package:supermarket_app/presentation/screens/admin/admin_dashboard_screen.dart';
+import 'package:supermarket_app/domain/entities/app_user.dart';
+import 'package:supermarket_app/domain/entities/user_role.dart';
+import 'package:supermarket_app/domain/entities/user_status.dart';
 
 void main() {
   test('admin all-orders list supports search, sort, and status filter',
@@ -20,6 +23,15 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         orderRepositoryProvider.overrideWith((ref) => repository),
+        currentUserProfileProvider.overrideWithValue(
+          const AsyncValue<AppUser?>.data(
+            AppUser(
+              uid: 'admin-1',
+              role: UserRole.owner,
+              status: UserStatus.active,
+            ),
+          ),
+        ),
       ],
     );
     addTearDown(container.dispose);
@@ -58,6 +70,15 @@ void main() {
         overrides: [
           isAdminProvider.overrideWith((ref) => Stream<bool>.value(true)),
           orderRepositoryProvider.overrideWith((ref) => repository),
+          currentUserProfileProvider.overrideWithValue(
+            const AsyncValue<AppUser?>.data(
+              AppUser(
+                uid: 'admin-1',
+                role: UserRole.owner,
+                status: UserStatus.active,
+              ),
+            ),
+          ),
           dashboardInventoryStatsProvider.overrideWith((ref) async {
             return const ProductStats(
               totalProducts: 3,

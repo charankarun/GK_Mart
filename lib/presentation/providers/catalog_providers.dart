@@ -1,10 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
+import '../../core/errors/repository_exception.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/product_page.dart';
 export 'category_provider.dart';
 import 'repository_providers.dart';
+import 'role_provider.dart';
 
 final productsStreamProvider = StreamProvider<List<Product>>((ref) {
   return ref.watch(productRepositoryProvider).watchProducts();
@@ -57,15 +59,24 @@ final productSearchResultsProvider = StateNotifierProvider.autoDispose
 
 final addProductProvider = Provider<Future<void> Function(Product)>((ref) {
   return (product) {
+    final permissions = ref.read(userPermissionsProvider);
+    if (!permissions.canManageProducts) {
+      throw const RepositoryException('Access denied. Insufficient permissions.');
+    }
     return ref.read(productRepositoryProvider).addProduct(product);
   };
 });
 
 final updateProductProvider = Provider<Future<void> Function(Product)>((ref) {
   return (product) {
+    final permissions = ref.read(userPermissionsProvider);
+    if (!permissions.canManageProducts) {
+      throw const RepositoryException('Access denied. Insufficient permissions.');
+    }
     return ref.read(productRepositoryProvider).updateProduct(product);
   };
 });
+
 
 typedef ProductPageLoader = Future<ProductPage> Function({
   required int limit,

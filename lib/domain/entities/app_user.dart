@@ -1,3 +1,6 @@
+import 'user_role.dart';
+import 'user_status.dart';
+
 class AppUser {
   const AppUser({
     required this.uid,
@@ -9,6 +12,10 @@ class AppUser {
     this.photoUrl = '',
     this.createdAt,
     this.updatedAt,
+    this.role = UserRole.customer,
+    this.roleUpdatedAt,
+    this.roleUpdatedBy = '',
+    this.status = UserStatus.active,
   });
 
   final String uid;
@@ -20,6 +27,10 @@ class AppUser {
   final String photoUrl;
   final DateTime? createdAt;
   final DateTime? updatedAt;
+  final UserRole role;
+  final DateTime? roleUpdatedAt;
+  final String roleUpdatedBy;
+  final UserStatus status;
 
   String get displayName {
     if (name.trim().isNotEmpty) return name.trim();
@@ -45,6 +56,10 @@ class AppUser {
     String? photoUrl,
     DateTime? createdAt,
     DateTime? updatedAt,
+    UserRole? role,
+    DateTime? roleUpdatedAt,
+    String? roleUpdatedBy,
+    UserStatus? status,
   }) {
     return AppUser(
       uid: uid ?? this.uid,
@@ -56,6 +71,11 @@ class AppUser {
       photoUrl: photoUrl ?? this.photoUrl,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      role: role ?? this.role,
+      roleUpdatedAt: roleUpdatedAt ?? this.roleUpdatedAt,
+      roleUpdatedBy: roleUpdatedBy ?? this.roleUpdatedBy,
+      status: status ?? this.status,
     );
   }
 }
+

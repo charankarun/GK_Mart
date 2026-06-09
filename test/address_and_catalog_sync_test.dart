@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supermarket_app/domain/entities/app_user.dart';
+import 'package:supermarket_app/domain/entities/user_role.dart';
+import 'package:supermarket_app/domain/entities/user_status.dart';
 import 'package:supermarket_app/domain/entities/auth_session.dart';
 import 'package:supermarket_app/domain/entities/cart_item.dart';
 import 'package:supermarket_app/domain/entities/product.dart';
@@ -171,6 +173,22 @@ class _FakeUserRepository implements UserRepository {
 
   @override
   Future<void> updateAddress({required String uid, required String address}) async {}
+
+  @override
+  Stream<List<AppUser>> watchUsers({
+    int? limit,
+    String? searchQuery,
+    UserRole? filterRole,
+  }) {
+    return Stream.value(_user != null ? [_user!] : []);
+  }
+
+  @override
+  Future<void> updateUserRole({
+    required String uid,
+    required UserRole role,
+    required String updatedBy,
+  }) async {}
 }
 
 class _FakeProductRepository implements ProductRepository {

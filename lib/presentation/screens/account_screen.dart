@@ -9,6 +9,7 @@ import '../../domain/entities/app_user.dart';
 import '../providers/admin_mode_provider.dart';
 import '../providers/auth_providers.dart';
 import '../providers/repository_providers.dart';
+import '../providers/role_provider.dart';
 import '../widgets/app_cached_network_image.dart';
 import '../widgets/customer_support_sheet.dart';
 import 'address_screen.dart';
@@ -16,6 +17,7 @@ import 'admin/admin_category_screen.dart';
 import 'admin/admin_inventory_screen.dart';
 import 'admin/admin_orders_screen.dart';
 import 'admin/store_settings_screen.dart';
+import 'admin/user_management_screen.dart';
 import 'edit_profile_screen.dart';
 import 'orders_screen.dart';
 
@@ -38,10 +40,8 @@ class AccountPage extends ConsumerWidget {
     }
 
     final userAsync = ref.watch(currentUserProfileProvider);
-    final isAdmin = ref.watch(isAdminProvider).maybeWhen(
-          data: (value) => value,
-          orElse: () => false,
-        );
+    final permissions = ref.watch(userPermissionsProvider);
+    final isAdmin = permissions.isAdministrative;
     final adminMode = ref.watch(adminModeProvider);
     final isSigningOut = ref.watch(_signOutLoadingProvider);
 
@@ -120,58 +120,76 @@ class AccountPage extends ConsumerWidget {
             onTap: () => showCustomerSupportSheet(context),
           ),
 
-          if (isAdmin) ...[
+          if (permissions.isAdministrative) ...[
             const SizedBox(height: 8),
             _SectionLabel(label: AccountText.adminTools),
-            _AccountOption(
-              icon: Icons.inventory_2_outlined,
-              title: AccountText.manageProducts,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const AdminInventoryScreen(),
-                  ),
-                );
-              },
-            ),
-            _AccountOption(
-              icon: Icons.category_outlined,
-              title: AccountText.manageCategories,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const AdminCategoryScreen(),
-                  ),
-                );
-              },
-            ),
-            _AccountOption(
-              icon: Icons.admin_panel_settings_outlined,
-              title: AccountText.adminPanel,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const AdminOrdersScreen(),
-                  ),
-                );
-              },
-            ),
-            _AccountOption(
-              icon: Icons.storefront_outlined,
-              title: 'Store Settings',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const StoreSettingsScreen(),
-                  ),
-                );
-              },
-            ),
+            if (permissions.canManageInventory)
+              _AccountOption(
+                icon: Icons.inventory_2_outlined,
+                title: AccountText.manageProducts,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AdminInventoryScreen(),
+                    ),
+                  );
+                },
+              ),
+            if (permissions.canManageCategories)
+              _AccountOption(
+                icon: Icons.category_outlined,
+                title: AccountText.manageCategories,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AdminCategoryScreen(),
+                    ),
+                  );
+                },
+              ),
+            if (permissions.canManageOrders)
+              _AccountOption(
+                icon: Icons.admin_panel_settings_outlined,
+                title: AccountText.adminPanel,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AdminOrdersScreen(),
+                    ),
+                  );
+                },
+              ),
+            if (permissions.canManageStoreSettings)
+              _AccountOption(
+                icon: Icons.storefront_outlined,
+                title: 'Store Settings',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const StoreSettingsScreen(),
+                    ),
+                  );
+                },
+              ),
+            if (permissions.canManageUsers)
+              _AccountOption(
+                icon: Icons.people_outline_rounded,
+                title: 'User Management',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const UserManagementScreen(),
+                    ),
+                  );
+                },
+              ),
           ],
+
           const SizedBox(height: 18),
           SizedBox(
             height: 50,

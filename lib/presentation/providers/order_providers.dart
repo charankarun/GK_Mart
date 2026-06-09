@@ -6,12 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/errors/repository_exception.dart';
 import '../../core/notifications/notification_service.dart';
 import '../../core/utils/phone_number_normalizer.dart';
 import '../../domain/entities/order.dart';
 import '../../domain/entities/order_analytics.dart';
 import '../../domain/entities/order_page.dart';
 import 'repository_providers.dart';
+import 'role_provider.dart';
 
 final userOrdersProvider =
     StreamProvider.family<List<Order>, String>((ref, userId) {
@@ -19,6 +21,10 @@ final userOrdersProvider =
 });
 
 final ordersStreamProvider = StreamProvider<List<Order>>((ref) {
+  final permissions = ref.watch(userPermissionsProvider);
+  if (!permissions.canManageOrders) {
+    throw const RepositoryException('Access denied. Insufficient permissions.');
+  }
   return ref.watch(orderRepositoryProvider).watchAllOrders();
 });
 
@@ -27,6 +33,10 @@ final adminOrdersProvider = ordersStreamProvider;
 final orderAnalyticsProvider =
     FutureProvider.autoDispose.family<OrderAnalytics, DateTime>(
   (ref, date) async {
+    final permissions = ref.watch(userPermissionsProvider);
+    if (!permissions.canViewAnalytics) {
+      throw const RepositoryException('Access denied. Insufficient permissions.');
+    }
     _dashboardLog(
       'Riverpod orderAnalyticsProvider start date=${date.toIso8601String()}',
     );
@@ -54,6 +64,10 @@ final orderAnalyticsProvider =
 
 final dashboardRecentOrdersProvider =
     FutureProvider.autoDispose<List<Order>>((ref) async {
+  final permissions = ref.watch(userPermissionsProvider);
+  if (!permissions.canManageOrders) {
+    throw const RepositoryException('Access denied. Insufficient permissions.');
+  }
   _dashboardLog(
     'Orders query start dashboardRecentOrders '
     'limit=${OrderProviderConfig.dashboardRecentOrderLimit}',
@@ -86,15 +100,24 @@ final userOrderListProvider = StateNotifierProvider.autoDispose
 
 final adminOrderListProvider = StateNotifierProvider.autoDispose<
     AdminOrderListController, AsyncValue<OrderListState>>((ref) {
+  final permissions = ref.watch(userPermissionsProvider);
+  if (!permissions.canManageOrders) {
+    throw const RepositoryException('Access denied. Insufficient permissions.');
+  }
   return AdminOrderListController(ref)..loadInitial();
 });
 
 final adminDateOrderListProvider = StateNotifierProvider.autoDispose
     .family<AdminDateOrderListController, AsyncValue<OrderListState>, DateTime>(
   (ref, date) {
+    final permissions = ref.watch(userPermissionsProvider);
+    if (!permissions.canManageOrders) {
+      throw const RepositoryException('Access denied. Insufficient permissions.');
+    }
     return AdminDateOrderListController(ref, _dateOnly(date))..loadInitial();
   },
 );
+
 
 final orderDetailsProvider =
     StreamProvider.family<Order?, String>((ref, orderId) {

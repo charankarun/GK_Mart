@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../domain/entities/store_config.dart';
+import '../../providers/role_provider.dart';
 import '../../providers/store_providers.dart';
 import '../../widgets/app_state_widgets.dart';
+import 'access_denied_screen.dart';
 
 class StoreSettingsScreen extends ConsumerStatefulWidget {
   const StoreSettingsScreen({super.key});
@@ -31,8 +32,14 @@ class _StoreSettingsScreenState extends ConsumerState<StoreSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final permissions = ref.watch(userPermissionsProvider);
+    if (!permissions.canManageStoreSettings) {
+      return const AccessDeniedScreen();
+    }
+
     final configAsync = ref.watch(storeConfigProvider);
     final updateState = ref.watch(storeConfigUpdateControllerProvider);
+
 
     return Scaffold(
       backgroundColor: AppColors.background,
