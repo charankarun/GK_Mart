@@ -1,3 +1,17 @@
+// ==============================================================================
+// FILE: lib/main.dart
+// PURPOSE: Application entry point and startup initialization configuration.
+// LAYER: Presentation / Application Root
+// DEPENDENCIES: flutter, flutter_riverpod, firebase_core, firebase_messaging
+//
+// ARCHITECTURAL ROLE:
+// Bootstraps the Flutter framework, initializes external Firebase services 
+// (Authentication, Firestore, Cloud Messaging, App Check), sets up application-wide
+// error boundaries via AppErrorHandler, and wraps the UI with ProviderScope.
+// Configures top-level routing shells (AuthWrapper, MainScreen) and hooks up
+// notification listeners and custom authorization claim updates.
+// ==============================================================================
+
 import 'dart:async';
 import 'dart:developer' as developer;
 
@@ -31,6 +45,8 @@ import 'presentation/screens/splash_screen.dart';
 import 'presentation/screens/wishlist_screen.dart';
 import 'presentation/widgets/app_bottom_nav_icon.dart';
 
+/// The main execution callback called when the application is launched.
+/// Runs inside runZonedGuarded to catch unhandled asynchronous exceptions.
 Future<void> main() async {
   runZonedGuarded<Future<void>>(() async {
     WidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +56,9 @@ Future<void> main() async {
   }, AppErrorHandler.report);
 }
 
+/// Firebase Initialization setup sequence.
+/// Activates Firebase App Check, enables offline caching storage settings, 
+/// and configures push notification channels.
 Future<void> _initializeFirebase() async {
   await Firebase.initializeApp().timeout(AppDurations.startupTimeout);
   try {
@@ -56,14 +75,17 @@ Future<void> _initializeFirebase() async {
       error: error,
       stackTrace: stackTrace,
       name: 'AppCheckInit',
+      // Safe logger callback for monitoring validation integrity
     );
   }
+  // PERFORMANCE: Offline persistence enabled for Firestore queries
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,
   );
   await _initializeNotifications();
 }
 
+/// Sets up local and background notification routing capabilities.
 Future<void> _initializeNotifications() async {
   try {
     await NotificationService.instance.initialize(
@@ -74,6 +96,7 @@ Future<void> _initializeNotifications() async {
   }
 }
 
+/// The root Widget of the GK Mart application.
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -82,7 +105,7 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  late Future<void> _firebaseInitialization;
+  late final Future<void> _firebaseInitialization;
 
   @override
   void initState() {
@@ -112,11 +135,16 @@ class _MyAppState extends State<MyApp> {
   }
 }
 
+/// AuthWrapper coordinates access control on launch or session updates.
+/// Listens to authentication state streams and redirects user to
+/// either the AuthScreen or the MainScreen navigation container.
 class AuthWrapper extends ConsumerWidget {
   const AuthWrapper({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // SECURITY & BUSINESS RULE: Detects login changes.
+    // Unregisters obsolete messaging tokens and registers new FCM tokens.
     ref.listen<AuthSession?>(currentSessionProvider, (previous, next) {
       final previousUid = previous?.uid;
       final nextUid = next?.uid;
@@ -136,6 +164,9 @@ class AuthWrapper extends ConsumerWidget {
         });
       }
     });
+
+    // SECURITY: Checks isAdmin claims updates from backend token revisions.
+    // Directs administrators to active admin screens options.
     ref.listen<AsyncValue<bool>>(isAdminProvider, (previous, next) {
       final uid = ref.read(currentSessionProvider)?.uid;
       if (uid == null || uid.trim().isEmpty) return;
@@ -169,6 +200,7 @@ class AuthWrapper extends ConsumerWidget {
   }
 }
 
+/// Fallback loading screen displayed during session extraction.
 class _AuthLoadingScreen extends StatelessWidget {
   const _AuthLoadingScreen();
 
@@ -190,6 +222,8 @@ class _AuthLoadingScreen extends StatelessWidget {
   }
 }
 
+/// MainScreen provides the tab-scoped navigation shell for customers.
+/// Hosts the bottom navigation bar and coordinates active screen indexes.
 class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
 
@@ -234,12 +268,15 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     setState(() => _selectedIndex = index);
   }
 
+  /// Popping nested view stacks on tab re-selection.
   void _resetTabStack(int index) {
     if (index < 0 || index >= _tabNavigatorKeys.length) return;
 
     _tabNavigatorKeys[index].currentState?.popUntil((route) => route.isFirst);
   }
 
+  /// System back button intercepter, routes to primary Home tab 
+  /// before exiting the application completely.
   void _handleBackNavigation(bool didPop, Object? result) {
     if (didPop) return;
 
@@ -274,6 +311,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     final session = ref.watch(currentSessionProvider);
     final isAdminMode = ref.watch(effectiveAdminModeProvider);
 
+    // SECURITY: Auto-routes to administrative interface shell if admin mode is activated.
     if (isAdminMode) {
       return const AdminShellScreen();
     }

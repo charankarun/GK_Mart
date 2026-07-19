@@ -1,3 +1,14 @@
+// ==============================================================================
+// FILE: lib/presentation/navigation/customer_navigation_scope.dart
+// PURPOSE: InheritedWidget defining scoped navigation selectors for customer tabs.
+// LAYER: Presentation / Navigation Scopes
+// DEPENDENCIES: flutter widgets
+//
+// ARCHITECTURAL ROLE:
+// Exposes scoped methods to reset view states and trigger tab navigation actions
+// (e.g. redirecting from checkout completion to the orders list tab).
+// ==============================================================================
+
 import 'package:flutter/widgets.dart';
 
 typedef CustomerTabSelector = void Function(
@@ -6,6 +17,7 @@ typedef CustomerTabSelector = void Function(
   bool resetTargetStack,
 });
 
+/// Navigation context scope for managing bottom tab selections and deep link redirections.
 class CustomerNavigationScope extends InheritedWidget {
   const CustomerNavigationScope({
     super.key,

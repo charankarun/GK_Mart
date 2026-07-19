@@ -1,25 +1,46 @@
+// ==============================================================================
+// FILE: storage.rules
+// PURPOSE: Declarative access rules for Firebase Cloud Storage.
+// LAYER: Security & Cloud Storage Policies
+// ARCHITECTURAL ROLE:
+// Restricts read and write actions on stored assets. Enforces file type filters 
+// (e.g. image/jpeg, png) and size limit bounds on uploads for products, categories, 
+// and profile photos to prevent malicious file execution or storage exhaustion.
+// ==============================================================================
+
 rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
+    
+    // --------------------------------------------------------------------------
+    // AUTHENTICATION & ACCESS CHECKS
+    // --------------------------------------------------------------------------
+
+    // SECURITY: Authenticated check.
+    // Allowed: Users logged in with Firebase Authentication.
     function signedIn() {
       return request.auth != null;
     }
 
+    // SECURITY: Checks if the master admin configuration document exists in Firestore.
     function adminConfigExists() {
       return firestore.exists(/databases/(default)/documents/admin_config/admins);
     }
 
+    // SECURITY: Retrieves the static list of administrator attributes from Firestore.
     function adminData() {
       return firestore.get(/databases/(default)/documents/admin_config/admins).data;
     }
 
+    // SECURITY: Matches the current user's UID against the admin configuration records.
     function adminUidMatches() {
       return request.auth.uid in adminData().get('uids', [])
         || request.auth.uid in adminData().get('adminUids', [])
         || request.auth.uid in adminData().get('admin_uids', []);
     }
 
+    // SECURITY: Matches the current user's email address against the admin configuration records.
     function adminEmailMatches() {
       return request.auth.token.email is string
         && (
@@ -29,6 +50,7 @@ service firebase.storage {
         );
     }
 
+    // SECURITY: Matches the current user's phone number against the admin configuration records.
     function adminPhoneMatches() {
       return request.auth.token.phone_number is string
         && (
@@ -38,6 +60,7 @@ service firebase.storage {
         );
     }
 
+    // SECURITY: Checks custom claims inside the user's JWT auth token for administrative roles.
     function adminClaimMatches() {
       return request.auth.token.admin == true
         || request.auth.token.role == 'admin'
@@ -46,24 +69,28 @@ service firebase.storage {
         || request.auth.token.role == 'Owner';
     }
 
+    // SECURITY: Verifies that a profile document for the authenticated user exists in Firestore.
     function userProfileExists() {
       return firestore.exists(/databases/(default)/documents/users/$(request.auth.uid));
     }
 
+    // SECURITY: Retrieves user profile data to check role configurations from Firestore.
     function userProfileData() {
       return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
     }
 
+    // SECURITY: Inspects the role field in the user's Firestore document.
     function userRoleMatches() {
       return userProfileExists()
         && (
           userProfileData().get('role', '') == 'admin'
           || userProfileData().get('role', '') == 'owner'
           || userProfileData().get('role', '') == 'Admin'
-          || userProfileData().get('role', '') == 'Owner'
+          || userProfileData().get('role', '') == 'Owner';
         );
     }
 
+    // SECURITY: Checks if the user has administrative privileges.
     function isAdmin() {
       return signedIn()
         && (
@@ -76,6 +103,12 @@ service firebase.storage {
         );
     }
 
+    // --------------------------------------------------------------------------
+    // VALIDATIONS
+    // --------------------------------------------------------------------------
+
+    // SECURITY: Restricts uploaded file size and content types to safe images only.
+    // Prevents binary injections or non-image assets in media collections.
     function validImage(maxBytes) {
       return request.resource != null
         && request.resource.size > 0
@@ -83,23 +116,34 @@ service firebase.storage {
         && request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
     }
 
+    // SECURITY: Verifies if the file prefix matches the owner's UID to prevent users from rewriting other user's images.
     function isOwnerProfileImage(fileName) {
       return signedIn()
         && fileName.matches('^' + request.auth.uid + '_.*');
     }
 
+    // --------------------------------------------------------------------------
+    // RESOURCE MATCH BLOCKS
+    // --------------------------------------------------------------------------
+
+    // PATH: Product catalog pictures folder.
+    // Security Design: Public read to allow catalog display. Creation and edits restricted to admin uploads <= 1.5MB.
     match /product_images/{fileName} {
       allow read: if true;
       allow create, update: if isAdmin() && validImage(1536 * 1024);
       allow delete: if isAdmin();
     }
 
+    // PATH: Category catalog pictures folder.
+    // Security Design: Public read. Creation and edits restricted to admin uploads <= 1MB.
     match /category_images/{fileName} {
       allow read: if true;
       allow create, update: if isAdmin() && validImage(1024 * 1024);
       allow delete: if isAdmin();
     }
 
+    // PATH: User avatar pictures folder.
+    // Security Design: Readable by logged-in users. Creation and removal restricted to matching owner UID prefix <= 1MB.
     match /profile_images/{fileName} {
       allow read: if signedIn();
       allow create, update: if isOwnerProfileImage(fileName)
@@ -107,6 +151,8 @@ service firebase.storage {
       allow delete: if isOwnerProfileImage(fileName);
     }
 
+    // DEFAULT FALLBACK RULE
+    // SECURITY: Block all requests to paths that are not explicitly matched.
     match /{allPaths=**} {
       allow read, write: if false;
     }

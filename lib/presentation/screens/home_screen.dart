@@ -724,46 +724,89 @@ class _PromoBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         child: AspectRatio(
           aspectRatio: 16 / 6,
-          child: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF0C8346), Color(0xFF10B981)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: Stack(
-              children: [
-                Positioned(
-                  right: -40,
-                  top: -40,
-                  child: Container(
-                    width: 180,
-                    height: 180,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.08),
-                      shape: BoxShape.circle,
-                    ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bw = constraints.maxWidth;
+              final bh = constraints.maxHeight;
+              return Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF0C8346), Color(0xFF10B981)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
                 ),
-                Positioned(
-                  left: -20,
-                  bottom: -20,
-                  child: Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      shape: BoxShape.circle,
+                child: Stack(
+                  clipBehavior: Clip.hardEdge,
+                  children: [
+                    // ── Decorative background circles ──────────────────────
+                    Positioned(
+                      right: -40,
+                      top: -40,
+                      child: Container(
+                        width: 180,
+                        height: 180,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.07),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 6,
+                    Positioned(
+                      left: -20,
+                      bottom: -20,
+                      child: Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.04),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+
+                    // ── Grocery products — right side, fills full banner height ──
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      width: bw * 0.56,
+                      height: bh,
+                      child: Image.asset(
+                        HomeText.bannerAsset,
+                        fit: BoxFit.cover,
+                        alignment: Alignment.centerLeft,
+                      ),
+                    ),
+
+                    // ── Gradient: dark-green → transparent (left → right) ──
+                    // Keeps text crisp; products visible on the right
+                    Positioned.fill(
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Color(0xFF0C8346),       // solid green
+                              Color(0xFF0C8346),       // hold solid to 40%
+                              Color(0x880D9955),       // semi-transparent
+                              Color(0x000D9955),       // fully transparent
+                            ],
+                            stops: [0.0, 0.38, 0.55, 0.70],
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // ── Text content — left side ──────────────────────────
+                    Positioned(
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: bw * 0.52,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
                           alignment: Alignment.centerLeft,
@@ -772,7 +815,8 @@ class _PromoBanner extends StatelessWidget {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 3),
                                 decoration: BoxDecoration(
                                   color: AppColors.accent,
                                   borderRadius: BorderRadius.circular(4),
@@ -813,7 +857,8 @@ class _PromoBanner extends StatelessWidget {
                                 onTap: onShopNow,
                                 borderRadius: BorderRadius.circular(6),
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 5),
                                   decoration: BoxDecoration(
                                     color: Colors.white,
                                     borderRadius: BorderRadius.circular(6),
@@ -843,65 +888,11 @@ class _PromoBanner extends StatelessWidget {
                           ),
                         ),
                       ),
-                      Expanded(
-                        flex: 4,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            // Soft shadow behind the image
-                            Positioned(
-                              right: -10,
-                              bottom: -5,
-                              child: Container(
-                                width: 140,
-                                height: 140,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.12),
-                                      blurRadius: 24,
-                                      offset: const Offset(-8, -4),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            // Gradient transition overlay behind the image
-                            Positioned.fill(
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  gradient: RadialGradient(
-                                    colors: [
-                                      const Color(0xFF10B981).withValues(alpha: 0.3),
-                                      Colors.transparent,
-                                    ],
-                                    center: Alignment.centerRight,
-                                    radius: 0.8,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            // Scaled and positioned image emerging from the background
-                            Positioned.fill(
-                              child: Transform.scale(
-                                scale: 1.15,
-                                alignment: Alignment.bottomRight,
-                                child: Image.asset(
-                                  HomeText.bannerAsset,
-                                  fit: BoxFit.contain,
-                                  alignment: Alignment.bottomRight,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              );
+            },
           ),
         ),
       ),

@@ -87,12 +87,20 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       return;
     }
 
+    final tapTime = DateTime.now();
+    print('--- TIMING LOG: Send OTP button tapped at ${tapTime.toIso8601String()} ---');
+
     setState(() => isLoading = true);
 
     try {
+      final verifyStart = DateTime.now();
+      print('--- TIMING LOG: sendOtp call initiated at ${verifyStart.toIso8601String()} ---');
       await ref.read(phoneAuthRepositoryProvider).sendOtp(
             phoneNumber: _e164Phone,
             onCodeSent: (verId) {
+              final codeSentTime = DateTime.now();
+              print('--- TIMING LOG: codeSent callback reached at ${codeSentTime.toIso8601String()} ---');
+              print('--- TIMING LOG: Latency (Tap -> codeSent): ${codeSentTime.difference(tapTime).inMilliseconds} ms ---');
               if (!mounted) return;
 
               _otpSendTimestamps.add(DateTime.now());
@@ -106,12 +114,18 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               _showMessage(isResend ? 'OTP Resent Successfully' : 'OTP Sent Successfully');
             },
             onVerificationFailed: (message) {
+              final failTime = DateTime.now();
+              print('--- TIMING LOG: onVerificationFailed reached at ${failTime.toIso8601String()} ---');
+              print('--- TIMING LOG: Latency (Tap -> failure): ${failTime.difference(tapTime).inMilliseconds} ms ---');
               if (!mounted) return;
 
               setState(() => isLoading = false);
               _showMessage(_getFriendlyMessageFromString(message));
             },
             onAutoVerified: (_) async {
+              final autoTime = DateTime.now();
+              print('--- TIMING LOG: onAutoVerified reached at ${autoTime.toIso8601String()} ---');
+              print('--- TIMING LOG: Latency (Tap -> autoVerify): ${autoTime.difference(tapTime).inMilliseconds} ms ---');
               if (!mounted) return;
               setState(() => isLoading = false);
             },
@@ -161,6 +175,15 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   }
 
   String _getFriendlyErrorMessage(Object error) {
+    print('--- AUTH EXCEPTION (FriendlyErrorMessage) ---');
+    print('Error type: ${error.runtimeType}');
+    print('Error: $error');
+    if (error is FirebaseAuthException) {
+      print('Code: ${error.code}');
+      print('Message: ${error.message}');
+    }
+    print('---------------------------------------------');
+
     if (error is FirebaseAuthException) {
       final code = error.code;
       final message = (error.message ?? '').toLowerCase();
@@ -189,6 +212,10 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   }
 
   String _getFriendlyMessageFromString(String message) {
+    print('--- AUTH ERROR STRING (FriendlyMessageFromString) ---');
+    print('Message: $message');
+    print('---------------------------------------------');
+
     final lowerMessage = message.toLowerCase();
     if (lowerMessage.contains('blocked') ||
         lowerMessage.contains('unusual activity') ||

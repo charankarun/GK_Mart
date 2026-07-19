@@ -1,3 +1,20 @@
+// ==============================================================================
+// FILE: lib/presentation/screens/order_details_screen.dart
+// PURPOSE: Screen displaying a detailed breakdown of a single customer order.
+// LAYER: Presentation / Views (Screens)
+// DEPENDENCIES: orderDetailsProvider, OrderRepository
+//
+// ARCHITECTURAL ROLE:
+// Listens to real-time streams of individual order documents. Builds tracking UI
+// stepper indicators based on the order status, displays ordered catalog item lists,
+// and allows clients to request order cancellations if status is Placed/Confirmed/Packed.
+//
+// Order Details Screen Responsibilities:
+// - Display a progress stepper matching Placed/Confirmed/Packed/Shipped/Out for Delivery/Delivered/Cancelled.
+// - Stream order changes dynamically.
+// - Expose cancel interfaces for authorized user order states.
+// ==============================================================================
+
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
@@ -11,6 +28,7 @@ import '../providers/repository_providers.dart';
 import '../widgets/app_cached_network_image.dart';
 import '../widgets/app_state_widgets.dart';
 
+/// Screen displaying tracking timelines and items for a specific order.
 class OrderDetailsScreen extends ConsumerWidget {
   const OrderDetailsScreen({
     super.key,

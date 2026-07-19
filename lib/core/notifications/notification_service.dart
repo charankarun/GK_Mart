@@ -1,3 +1,15 @@
+// ==============================================================================
+// FILE: lib/core/notifications/notification_service.dart
+// PURPOSE: Handles background/foreground Firebase Cloud Messaging and local push notifications.
+// LAYER: Core / Push Notifications
+// DEPENDENCIES: firebase_messaging, flutter_local_notifications, cloud_firestore
+//
+// ARCHITECTURAL ROLE:
+// Registers user device tokens in users/{userId}/fcmTokens, listens for background
+// and foreground remote messages, streams client notifications directly from
+// the notifications/ database collection, and displays local heads-up banners on status transitions.
+// ==============================================================================
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
@@ -17,6 +29,7 @@ typedef NotificationSelectionHandler = void Function(
   NotificationPayload payload,
 );
 
+/// Background listener entry point triggered on receiving background push events.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,9 +37,11 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await NotificationService.showBackgroundNotification(message);
 }
 
+/// Tap event interceptor for background local notifications.
 @pragma('vm:entry-point')
 void localNotificationTapBackground(NotificationResponse response) {}
 
+/// Orchestrates local push banners, subscription listening streams, and tokens storage.
 class NotificationService {
   NotificationService._({
     FirebaseMessaging? messaging,

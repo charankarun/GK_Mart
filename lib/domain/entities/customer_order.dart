@@ -1,3 +1,11 @@
+// ==============================================================================
+// FILE: lib/domain/entities/customer_order.dart
+// PURPOSE: Domain models representing order items, order requests, and statuses.
+// LAYER: Domain / Core Entities
+// DEPENDENCIES: None
+// ==============================================================================
+
+/// Represents a single product item reference stored inside a customer's order.
 class OrderItem {
   const OrderItem({
     this.productId = '',
@@ -17,6 +25,7 @@ class OrderItem {
   final String imageUrl;
   final String unit;
 
+  /// Effective price calculated by checking if a discount is active.
   double get effectivePrice {
     if (discountPrice > 0 && discountPrice < price) return discountPrice;
     return price;
@@ -27,6 +36,7 @@ class OrderItem {
   double get lineSavings => (price - effectivePrice) * quantity;
 }
 
+/// Domain model representing a customer's checkout order.
 class Order {
   const Order({
     required this.id,
@@ -48,7 +58,10 @@ class Order {
     this.failureReason,
   });
 
+  /// The internal Firestore random auto-generated document ID.
   final String id;
+
+  /// The official sequential business order ID (e.g. GK00001) assigned by the backend.
   final String? orderId;
   final String userId;
   final String userName;

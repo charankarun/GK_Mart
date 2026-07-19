@@ -5,6 +5,7 @@ import '../../core/errors/app_error_handler.dart';
 import '../../core/theme/app_theme.dart';
 import '../../domain/entities/app_user.dart';
 import '../providers/auth_providers.dart';
+import '../providers/order_providers.dart';
 import '../providers/repository_providers.dart';
 import '../widgets/app_state_widgets.dart';
 
@@ -37,6 +38,7 @@ class _AddressScreenState extends ConsumerState<AddressScreen> {
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(currentSessionProvider);
+    final serviceablePincodes = ref.watch(serviceablePincodesProvider);
 
     if (session == null) {
       return Scaffold(
@@ -62,6 +64,7 @@ class _AddressScreenState extends ConsumerState<AddressScreen> {
               addressController: _addressController,
               landmarkController: _landmarkController,
               pincodeController: _pincodeController,
+              serviceablePincodes: serviceablePincodes,
               onCancel: _closeForm,
               onSave: () => _saveAddress(user),
             );
@@ -481,6 +484,7 @@ class _AddressFormView extends StatelessWidget {
     required this.addressController,
     required this.landmarkController,
     required this.pincodeController,
+    required this.serviceablePincodes,
     required this.onCancel,
     required this.onSave,
   });
@@ -491,6 +495,7 @@ class _AddressFormView extends StatelessWidget {
   final TextEditingController addressController;
   final TextEditingController landmarkController;
   final TextEditingController pincodeController;
+  final Set<String> serviceablePincodes;
   final VoidCallback onCancel;
   final VoidCallback onSave;
 
@@ -507,6 +512,7 @@ class _AddressFormView extends StatelessWidget {
             addressController: addressController,
             landmarkController: landmarkController,
             pincodeController: pincodeController,
+            serviceablePincodes: serviceablePincodes,
           ),
           const SizedBox(height: 18),
           IntrinsicHeight(
@@ -605,11 +611,13 @@ class _AddressFormCard extends StatelessWidget {
     required this.addressController,
     required this.landmarkController,
     required this.pincodeController,
+    required this.serviceablePincodes,
   });
 
   final TextEditingController addressController;
   final TextEditingController landmarkController;
   final TextEditingController pincodeController;
+  final Set<String> serviceablePincodes;
 
   @override
   Widget build(BuildContext context) {
@@ -676,6 +684,9 @@ class _AddressFormCard extends StatelessWidget {
     if (trimmed.isEmpty) return AddressText.requiredField;
     if (!RegExp(r'^[0-9]{6}$').hasMatch(trimmed)) {
       return AddressText.invalidPincode;
+    }
+    if (!serviceablePincodes.contains(trimmed)) {
+      return 'Delivery is not available here';
     }
     return null;
   }

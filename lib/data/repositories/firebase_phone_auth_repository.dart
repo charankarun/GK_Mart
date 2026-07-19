@@ -23,10 +23,12 @@ class FirebasePhoneAuthRepository implements PhoneAuthRepository {
     required void Function(String message) onVerificationFailed,
     required Future<void> Function(AuthSession session) onAutoVerified,
   }) {
+    print('--- TIMING LOG: verifyPhoneNumber started at ${DateTime.now().toIso8601String()} ---');
     return _auth
         .verifyPhoneNumber(
           phoneNumber: phoneNumber,
           verificationCompleted: (credential) async {
+            print('--- TIMING LOG: verificationCompleted triggered at ${DateTime.now().toIso8601String()} ---');
             final result = await _auth
                 .signInWithCredential(credential)
                 .timeout(AppDurations.networkTimeout);
@@ -37,11 +39,19 @@ class FirebasePhoneAuthRepository implements PhoneAuthRepository {
             await onAutoVerified(session);
           },
           verificationFailed: (exception) {
+            print('--- TIMING LOG: verificationFailed triggered at ${DateTime.now().toIso8601String()} ---');
+            print('--- TELEPHONY AUTH EXCEPTION (Repository) ---');
+            print('Code: ${exception.code}');
+            print('Message: ${exception.message}');
+            print('ToString: ${exception.toString()}');
+            print('StackTrace: ${StackTrace.current}');
+            print('---------------------------------------------');
             onVerificationFailed(
               exception.message ?? 'Phone verification failed',
             );
           },
           codeSent: (verificationId, _) {
+            print('--- TIMING LOG: codeSent triggered at ${DateTime.now().toIso8601String()} ---');
             onCodeSent(verificationId);
           },
           codeAutoRetrievalTimeout: (_) {},

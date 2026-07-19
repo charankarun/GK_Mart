@@ -1,3 +1,16 @@
+// ==============================================================================
+// FILE: lib/core/errors/app_error_handler.dart
+// PURPOSE: Global error handler and user-facing error notification service.
+// LAYER: Core / Diagnostics & Monitoring
+// DEPENDENCIES: firebase_crashlytics, flutter framework
+//
+// ARCHITECTURAL ROLE:
+// Establishes the top-level error capture boundaries for both Flutter framework
+// render crashes and unhandled async platform errors. Translates database exception
+// codes into user-friendly messages, suppresses noise (e.g. system permissions or
+// layouts), and logs issues directly to Crashlytics.
+// ==============================================================================
+
 import 'dart:async';
 import 'dart:developer' as developer;
 
@@ -11,6 +24,7 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import '../../presentation/navigation/notification_navigation_service.dart';
 import 'repository_exception.dart';
 
+/// Centralized error interception and snackbar messaging coordinator.
 class AppErrorHandler {
   AppErrorHandler._();
 

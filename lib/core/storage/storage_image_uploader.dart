@@ -1,3 +1,14 @@
+// ==============================================================================
+// FILE: lib/core/storage/storage_image_uploader.dart
+// PURPOSE: Client utility to upload byte arrays to Cloud Storage with transient failure retries.
+// LAYER: Core / Storage Services
+// DEPENDENCIES: firebase_storage
+//
+// ARCHITECTURAL ROLE:
+// Wraps standard Firebase Storage uploads with retry loops, timeout handles,
+// and transient network error classification policies.
+// ==============================================================================
+
 import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:typed_data';
@@ -6,6 +17,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 
 const _debugLoggingEnabled = !bool.fromEnvironment('dart.vm.product');
 
+/// Upload controller executing uploads with timeout and network retry policies.
 class StorageImageUploader {
   const StorageImageUploader._();
 

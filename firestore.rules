@@ -1,29 +1,53 @@
+// ==============================================================================
+// FILE: firestore.rules
+// PURPOSE: Declarative authorization and data validation rules for Cloud Firestore.
+// LAYER: Security & Database Rules
+// ARCHITECTURAL ROLE:
+// Acts as the primary database-level security policy. Validates schemas and enforces 
+// Role-Based Access Control (RBAC) and ownership requirements for all client-initiated 
+// requests. Serves as the ultimate defense against price/inventory tampering.
+// ==============================================================================
+
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // --------------------------------------------------------------------------
+    // AUTHENTICATION & ACCESS CHECKS
+    // --------------------------------------------------------------------------
+
+    // SECURITY: Authenticated check.
+    // Allowed: Users logged in with Firebase Authentication.
+    // Denied: Anonymous/unauthenticated guests.
     function signedIn() {
       return request.auth != null;
     }
 
+    // SECURITY: Resource ownership check.
+    // Allowed: Authenticated users whose UID matches the document identifier.
     function isOwner(userId) {
       return signedIn() && request.auth.uid == userId;
     }
 
+    // SECURITY: Checks if the master admin configuration document exists in Firestore.
     function adminConfigExists() {
       return exists(/databases/$(database)/documents/admin_config/admins);
     }
 
+    // SECURITY: Retrieves the static list of administrator attributes (emails, UIDs, phones).
     function adminData() {
       return get(/databases/$(database)/documents/admin_config/admins).data;
     }
 
+    // SECURITY: Matches the current user's UID against the admin configuration records.
     function adminUidMatches() {
       return request.auth.uid in adminData().get('uids', [])
         || request.auth.uid in adminData().get('adminUids', [])
         || request.auth.uid in adminData().get('admin_uids', []);
     }
 
+    // SECURITY: Matches the current user's email address against the admin configuration records.
     function adminEmailMatches() {
       return request.auth.token.email is string
         && (
@@ -33,6 +57,7 @@ service cloud.firestore {
         );
     }
 
+    // SECURITY: Matches the current user's phone number against the admin configuration records.
     function adminPhoneMatches() {
       return request.auth.token.phone_number is string
         && (
@@ -42,6 +67,7 @@ service cloud.firestore {
         );
     }
 
+    // SECURITY: Checks custom claims inside the user's JWT auth token for administrative roles.
     function adminClaimMatches() {
       return request.auth.token.admin == true
         || request.auth.token.role == 'admin'
@@ -50,14 +76,17 @@ service cloud.firestore {
         || request.auth.token.role == 'Owner';
     }
 
+    // SECURITY: Verifies that a profile document for the authenticated user exists.
     function userProfileExists() {
       return exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
+    // SECURITY: Retrieves user profile data to check role configurations.
     function userProfileData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    // SECURITY: Inspects the role field in the user's Firestore document.
     function userRoleMatches() {
       return userProfileExists()
         && (
@@ -68,11 +97,14 @@ service cloud.firestore {
         );
     }
 
+    // SECURITY: Checks if the user is suspended from performing actions.
+    // Suspended users are denied write access to system functions.
     function isSuspended() {
       return exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('status', 'active') == 'suspended';
     }
 
+    // SECURITY: Checks if the user is verified as an App Owner.
     function isAppOwner() {
       return signedIn()
         && !isSuspended()
@@ -85,6 +117,7 @@ service cloud.firestore {
         );
     }
 
+    // SECURITY: Checks if the user is verified as an App Admin.
     function isAppAdmin() {
       return signedIn()
         && !isSuspended()
@@ -97,6 +130,8 @@ service cloud.firestore {
         );
     }
 
+    // SECURITY: Compound admin privilege evaluation check.
+    // Resolves privileges through JWT claims, profiles, or static firestore admin configurations.
     function isAdmin() {
       return signedIn()
         && !isSuspended()
@@ -112,7 +147,11 @@ service cloud.firestore {
         );
     }
 
+    // --------------------------------------------------------------------------
+    // SCHEMAS & UTILITY VALIDATIONS
+    // --------------------------------------------------------------------------
 
+    // BUSINESS RULE: Valid states in the life cycle of a customer order.
     function validOrderStatus(status) {
       return status in [
         'Pending',
@@ -127,6 +166,7 @@ service cloud.firestore {
       ];
     }
 
+    // BUSINESS RULE: Validates formatting pattern of generated order identifiers.
     function validOrderId(orderId) {
       return orderId is string
         && (
@@ -136,6 +176,8 @@ service cloud.firestore {
         );
     }
 
+    // SECURITY & BUSINESS RULE: Order Creation schema and price integrity validation.
+    // Client-submitted total price calculations must align with subtotal reductions and delivery fees.
     function validOrderCreate(orderId) {
       let data = request.resource.data;
       return data.keys().hasOnly([
@@ -205,6 +247,7 @@ service cloud.firestore {
         && data.timestamp == request.time;
     }
 
+    // BUSINESS RULE: Validates parameters of a single product item.
     function validProductCore() {
       let data = request.resource.data;
       return data.get('name', '') is string
@@ -234,6 +277,7 @@ service cloud.firestore {
         && (!data.keys().hasAny(['quantityValue']) || (data.quantityValue is number && data.quantityValue >= 0));
     }
 
+    // BUSINESS RULE: Validates properties when a new product is created.
     function validProductCreate() {
       let data = request.resource.data;
       return data.keys().hasOnly([
@@ -272,6 +316,7 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    // BUSINESS RULE: Validates changes when product information is updated.
     function validProductUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'name',
@@ -295,6 +340,7 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time;
     }
 
+    // BUSINESS RULE: Checks the metadata fields of category documents.
     function validCategoryCore() {
       let data = request.resource.data;
       return data.get('name', '') is string
@@ -306,6 +352,7 @@ service cloud.firestore {
         && data.get('imageUrl', '') is string;
     }
 
+    // BUSINESS RULE: Ensures category fields are populated properly during creation.
     function validCategoryCreate() {
       let data = request.resource.data;
       return data.keys().hasOnly([
@@ -329,6 +376,7 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    // BUSINESS RULE: Checks properties updated on category modifications.
     function validCategoryUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'name',
@@ -341,6 +389,7 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time;
     }
 
+    // SECURITY: Fields a normal customer can write to their own profile.
     function userWriteKeys() {
       return [
         'name',
@@ -354,6 +403,7 @@ service cloud.firestore {
       ];
     }
 
+    // BUSINESS RULE: Validates profile fields formatting and size thresholds.
     function validUserFields(data) {
       return data.get('name', '') is string
         && data.get('email', '') is string
@@ -365,6 +415,7 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    // SECURITY: Enforces default 'customer' role and 'active' status on registration.
     function validUserCreate() {
       let data = request.resource.data;
       return data.keys().hasOnly(userWriteKeys().concat(['role', 'status']))
@@ -373,19 +424,21 @@ service cloud.firestore {
         && data.get('status', 'active') == 'active';
     }
 
+    // SECURITY: Prevents a client from writing admin fields on update.
     function validUserUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(userWriteKeys())
         && validUserFields(request.resource.data);
     }
 
-
+    // SECURITY: Validates size bounds of FCM tokens.
     function validFcmTokenId(tokenId) {
       return tokenId is string
         && tokenId.size() > 0
         && tokenId.size() <= 512;
     }
 
+    // SECURITY: Validates fields of registered client device tokens.
     function validFcmTokenFields(data) {
       return data.get('token', '') is string
         && data.get('token', '').size() >= 20
@@ -405,6 +458,7 @@ service cloud.firestore {
         && data.get('lastSeenAt', request.time) is timestamp;
     }
 
+    // SECURITY: Ensures system timestamps match server request time during token creation.
     function validFcmTokenCreate(tokenId) {
       let data = request.resource.data;
       return validFcmTokenId(tokenId)
@@ -430,6 +484,7 @@ service cloud.firestore {
         && data.lastSeenAt == request.time;
     }
 
+    // SECURITY: Preserves token creation date when device updates status metadata.
     function validFcmTokenCreatedAtUpdate() {
       return (
           resource.data.keys().hasAll(['createdAt'])
@@ -442,6 +497,7 @@ service cloud.firestore {
         );
     }
 
+    // SECURITY: Updates status metadata on specific tokens.
     function validFcmTokenUpdate(tokenId) {
       return validFcmTokenId(tokenId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -458,6 +514,7 @@ service cloud.firestore {
         && request.resource.data.lastSeenAt == request.time;
     }
 
+    // BUSINESS RULE: Validates customer address constraints.
     function validAddressDocument() {
       let data = request.resource.data;
       return data.keys().hasOnly([
@@ -478,6 +535,7 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    // BUSINESS RULE: Prevents client side bulk wishlist overflow.
     function validWishlistWrite() {
       let data = request.resource.data;
       return data.keys().hasOnly(['productIds'])
@@ -485,6 +543,7 @@ service cloud.firestore {
         && data.get('productIds', []).size() <= 500;
     }
 
+    // SECURITY: Validates cart item details to prevent client-side quantity/pricing spoofing.
     function validCartItemWrite() {
       let data = request.resource.data;
       return data.keys().hasOnly([
@@ -515,6 +574,13 @@ service cloud.firestore {
         && data.get('quantity', 0) <= 99;
     }
 
+    // --------------------------------------------------------------------------
+    // PATH MATCH RULES
+    // --------------------------------------------------------------------------
+
+    // RESOURCE: Users Profile and Sub-collections
+    // Security Design: Owners and App Owners hold full write configurations.
+    // Customers can write profile data, except role/suspension keys.
     match /users/{userId} {
       allow get: if isOwner(userId) || isAppOwner();
       allow list: if isAppOwner();
@@ -546,7 +612,12 @@ service cloud.firestore {
       }
     }
 
-
+    // RESOURCE: Orders collection
+    // ARCHITECTURE FLOW:
+    // 1. Client creates a 'Pending' Order document.
+    // 2. Client is blocked from setting status directly to 'Placed'.
+    // 3. Firestore Function validates order pricing and deductions, then updates status to 'Placed'.
+    // 4. Clients listen to document updates for final execution verification.
     match /orders/{orderId} {
       allow create: if signedIn() && !isSuspended() && validOrderCreate(orderId)
         && (
@@ -565,20 +636,26 @@ service cloud.firestore {
           && request.resource.data.status in ['Cancelled', 'Cancellation_Requested']
           && resource.data.status in ['Placed', 'Pending', 'Order Confirmed', 'Packed']
         );
-      allow delete: if false;
+      allow delete: if false; // Orders can never be deleted directly by clients.
     }
 
+    // RESOURCE: Counters (Internal ID generators)
+    // Security Design: Locked down completely to clients. Counter increments are executed on Backend.
     match /counters/{counterId} {
       allow read, write: if false;
     }
 
+    // RESOURCE: Store Configuration Settings
+    // Security Design: Any customer can read configured flags (e.g. storeEnabled), modifications restricted to Admins.
     match /store_settings/{documentId} {
       allow read: if signedIn();
       allow write: if isAdmin();
     }
 
+    // RESOURCE: Notification logs
+    // Security Design: Customers can read or mark as read only notifications targeting their UID. Admins manage all.
     match /notifications/{notificationId} {
-      allow create: if false; // Backend only
+      allow create: if false; // Push notifications are written only by the server-side trigger functions.
       // Customers can read their own notifications; admins can read admin-targeted ones.
       allow read: if signedIn()
         && (
@@ -596,6 +673,8 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // RESOURCE: Catalog products
+    // Security Design: Publicly readable so that customers can browse the catalog. Writes restricted to Admins.
     match /products/{productId} {
       allow read: if true;
       allow create: if isAdmin() && validProductCreate();
@@ -603,6 +682,8 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // RESOURCE: Catalog categories
+    // Security Design: Publicly readable for navigation. Writes restricted to Admins.
     match /categories/{categoryId} {
       allow read: if true;
       allow create: if isAdmin() && validCategoryCreate();
@@ -610,12 +691,16 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // RESOURCE: Wishlists
+    // Security Design: Restructured so only the specific owner of the wishlist can read/write.
     match /wishlist/{userId} {
       allow read: if isOwner(userId);
       allow create, update: if isOwner(userId) && validWishlistWrite();
       allow delete: if isOwner(userId);
     }
 
+    // RESOURCE: Shopping Carts
+    // Security Design: Locked to owner profile. Writes are restricted to individual items subcollection.
     match /carts/{userId} {
       allow read: if isOwner(userId);
       allow write: if false;
@@ -627,15 +712,21 @@ service cloud.firestore {
       }
     }
 
+    // RESOURCE: Static Configuration Admin Rules list
+    // Security Design: Visible only to Admins for authority checking. Clients are denied access.
     match /admin_config/{documentId} {
       allow read: if isAdmin();
       allow write: if false;
     }
 
+    // RESOURCE: Administrative System Analytics Data
+    // Security Design: Full access restricted to App Owner.
     match /system_stats/{documentId} {
       allow read, write: if isAppOwner();
     }
 
+    // DEFAULT RETRIEVAL RULES FALLBACK
+    // SECURITY: Any unmatched path is blocked by default (Closed-by-Default security posture).
     match /{document=**} {
       allow read, write: if false;
     }

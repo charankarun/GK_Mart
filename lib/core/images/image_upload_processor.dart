@@ -1,8 +1,21 @@
+// ==============================================================================
+// FILE: lib/core/images/image_upload_processor.dart
+// PURPOSE: Client-side compression, resizing, and validation processor for image uploads.
+// LAYER: Core / Media Services
+// DEPENDENCIES: image package
+//
+// ARCHITECTURAL ROLE:
+// Ensures uploaded files conform to maximum boundary dimensions and memory sizes
+// before storage transmission. Normalizes PNG/WEBP files into standard JPEGs,
+// scales down overflow sizes, and reduces compression quality progressively to fit bounds.
+// ==============================================================================
+
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
+/// Holds the output bytes and dimensions of a validated, compressed image upload.
 class ProcessedImageUpload {
   const ProcessedImageUpload({
     required this.bytes,
@@ -19,6 +32,7 @@ class ProcessedImageUpload {
   final int height;
 }
 
+/// Thrown when selected images fail content type, dimension, or size rules.
 class ImageValidationException implements Exception {
   const ImageValidationException(this.message);
 
@@ -28,6 +42,7 @@ class ImageValidationException implements Exception {
   String toString() => message;
 }
 
+/// Dynamic compressor and validator enforcing standard constraints.
 class ImageUploadProcessor {
   const ImageUploadProcessor._();
 

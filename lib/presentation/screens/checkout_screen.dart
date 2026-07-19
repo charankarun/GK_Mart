@@ -1,3 +1,22 @@
+// ==============================================================================
+// FILE: lib/presentation/screens/checkout_screen.dart
+// PURPOSE: Screen displaying checkout summary, validating stock, and placing orders.
+// LAYER: Presentation / Views (Screens)
+// DEPENDENCIES: OrderCreationController, CartSyncNotifier, Riverpod providers
+//
+// ARCHITECTURAL ROLE:
+// Coordinates the checkout process. Displays pricing summaries, delivery addresses,
+// and items. Before submitting, it performs client-side verification on item stock limits.
+// It creates a 'Pending' status order and listens to backend transaction updates.
+//
+// Checkout Screen Responsibilities:
+// - Display checkout summary (Subtotal, Cart Discounts, Delivery Fees, Grand Total).
+// - Synchronize latest catalog parameters to prevent price spoofing/outdated cache parameters.
+// - Validate stock availability dynamically before launching order flows.
+// - Submit a Pending order, block client inputs, and await server validation.
+// - Route the customer to the success page only after backend confirms order placement.
+// ==============================================================================
+
 import 'dart:async';
 import 'dart:developer' as developer;
 
@@ -24,6 +43,7 @@ import 'order_success_screen.dart';
 import '../../core/errors/repository_exception.dart';
 import '../navigation/customer_navigation_scope.dart';
 
+/// Screen coordinating user checkout flows and order creation transactions.
 class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
 

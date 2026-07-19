@@ -1,8 +1,21 @@
+// ==============================================================================
+// FILE: lib/domain/repositories/order_repository.dart
+// PURPOSE: Abstract interface contract defining order tracking and query behavior.
+// LAYER: Domain / Repository Contracts
+// DEPENDENCIES: Domain entities (Order, CartItem, OrderAnalytics, OrderPage)
+//
+// ARCHITECTURAL ROLE:
+// Decouples UI controllers (providers) from specific database clients (Firestore).
+// Defines contract interfaces for real-time order streams, paginated queries,
+// full-text order searches, status updates, and order placements.
+// ==============================================================================
+
 import '../entities/cart_item.dart';
 import '../entities/customer_order.dart';
 import '../entities/order_analytics.dart';
 import '../entities/order_page.dart';
 
+/// Abstract repository defining order management CRUD operations.
 abstract class OrderRepository {
   Stream<List<Order>> watchUserOrders(String userId, {int limit = 20});
 

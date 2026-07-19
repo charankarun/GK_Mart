@@ -1,3 +1,17 @@
+// ==============================================================================
+// FILE: lib/data/repositories/firestore_order_repository.dart
+// PURPOSE: Concrete Firestore repository implementation for order tracking and queries.
+// LAYER: Data / Repositories Implementation
+// DEPENDENCIES: cloud_firestore, Domain entities
+//
+// ARCHITECTURAL ROLE:
+// Manages data access policies for customer and admin orders. Map raw Firestore
+// documents into domain Order entities. Employs cursor-based paginated queries,
+// compound indices optimization, client-side filtering over Direct candidate IDs,
+// and full-text prefix token mappings to provide rapid admin searches without
+// full database scans.
+// ==============================================================================
+
 import 'dart:developer' as developer;
 
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
@@ -13,6 +27,7 @@ import '../../domain/repositories/order_repository.dart';
 import '../../domain/entities/store_config.dart';
 import '../mappers/firestore_value_parser.dart';
 
+/// Handles transaction-based order placements and optimized order listings searches.
 class FirestoreOrderRepository implements OrderRepository {
   FirestoreOrderRepository(this._firestore);
 

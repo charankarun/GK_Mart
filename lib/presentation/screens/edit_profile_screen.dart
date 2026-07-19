@@ -13,6 +13,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/phone_number_normalizer.dart';
 import '../../domain/entities/app_user.dart';
 import '../providers/auth_providers.dart';
+import '../providers/order_providers.dart';
 import '../providers/repository_providers.dart';
 import '../widgets/app_cached_network_image.dart';
 import '../widgets/app_state_widgets.dart';
@@ -61,6 +62,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     }
 
     final userAsync = ref.watch(currentUserProfileProvider);
+    final serviceablePincodes = ref.watch(serviceablePincodesProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -89,6 +91,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   phoneController: _phoneController,
                   addressController: _addressController,
                   pincodeController: _pincodeController,
+                  serviceablePincodes: serviceablePincodes,
                 ),
                 const SizedBox(height: 18),
                 SizedBox(
@@ -428,12 +431,14 @@ class _ProfileFormCard extends StatelessWidget {
     required this.phoneController,
     required this.addressController,
     required this.pincodeController,
+    required this.serviceablePincodes,
   });
 
   final TextEditingController nameController;
   final TextEditingController phoneController;
   final TextEditingController addressController;
   final TextEditingController pincodeController;
+  final Set<String> serviceablePincodes;
 
   @override
   Widget build(BuildContext context) {
@@ -511,6 +516,9 @@ class _ProfileFormCard extends StatelessWidget {
     if (trimmed.isEmpty) return null;
     if (!RegExp(r'^[0-9]{6}$').hasMatch(trimmed)) {
       return 'Enter a valid 6-digit pincode';
+    }
+    if (!serviceablePincodes.contains(trimmed)) {
+      return 'Delivery is not available here';
     }
     return null;
   }

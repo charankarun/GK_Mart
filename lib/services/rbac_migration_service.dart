@@ -1,3 +1,15 @@
+// ==============================================================================
+// FILE: lib/services/rbac_migration_service.dart
+// PURPOSE: Administrative helper to migrate legacy user profiles to newer RBAC structures.
+// LAYER: Business / Maintenance Services
+// DEPENDENCIES: cloud_firestore, userPermissionsProvider
+//
+// ARCHITECTURAL ROLE:
+// Provides batch data migration routines. Upgrades user schema configurations
+// to ensure every customer profile holds valid roles and active status descriptors.
+// Restricts execution access strictly to authenticated Owner UIDs.
+// ==============================================================================
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,10 +17,12 @@ import '../domain/entities/user_role.dart';
 import '../domain/entities/user_status.dart';
 import '../presentation/providers/role_provider.dart';
 
+/// Provider for RbacMigrationService.
 final rbacMigrationServiceProvider = Provider<RbacMigrationService>((ref) {
   return RbacMigrationService(ref);
 });
 
+/// Service providing batch migrations for roles/status settings.
 class RbacMigrationService {
   final Ref _ref;
 
