@@ -6,6 +6,7 @@ import * as v1 from "firebase-functions/v1";
 import * as admin from "firebase-admin";
 admin.initializeApp();
 const db = admin.firestore();
+const messaging = admin.messaging();
 
 export const processPendingOrder = functions.firestore.onDocumentCreated(
   "orders/{orderId}",
@@ -284,6 +285,19 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         });
 
         await batch.commit();
+
+        // FCM push delivery — runs after Firestore write, never blocks order flow
+        await sendFcmToUser(
+          order.userId,
+          title,
+          body,
+          { type: "customer_order_placed", orderId: event.params.orderId, status: "placed", amount: amountStr }
+        );
+        await sendFcmToAdmins(
+          `New Order: ${generatedOrderId}`,
+          adminBody,
+          { type: "admin_new_order", orderId: event.params.orderId, status: "placed", amount: amountStr }
+        );
       } catch (error) {
         logger.warn("processPendingOrder: notification dispatch failed (non-critical)", { functionName: "processPendingOrder", orderId: event.params.orderId, officialOrderId: generatedOrderId, operation: "notification_dispatch", error: (error as any)?.message });
       }
@@ -421,6 +435,14 @@ export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         isRead: false
       });
+
+      // FCM push delivery — runs after Firestore write, never blocks order flow
+      await sendFcmToUser(
+        targetUserId,
+        `Order ${status}`,
+        `Your order is now ${status}.`,
+        { type: "order_status", orderId: orderId, status: normalizedStatus }
+      );
       logger.info("processOrderStatusUpdate: status notification dispatched", { functionName: "processOrderStatusUpdate", orderId, status, eventType: `status_${normalizedStatus}`, targetUserId, operation: "notification_dispatch" });
     } catch (error) {
       logger.warn("processOrderStatusUpdate: notification dispatch failed (non-critical)", { functionName: "processOrderStatusUpdate", orderId, status, targetUserId, operation: "notification_dispatch", error: (error as any)?.message });
@@ -908,6 +930,178 @@ export const processAuthoritativeAnalytics = functions.firestore.onDocumentUpdat
     }
   }
 );
+
+/**
+ * @helper sendFcmToUser
+ * @purpose Reads all valid FCM tokens for a single user and dispatches a FCM push.
+ *   Automatically deletes expired or invalid tokens from Firestore.
+ *   Never throws — all errors are logged as warnings.
+ * @param userId  Firestore UID of the target user.
+ * @param title   Notification title shown in the system tray.
+ * @param body    Notification body shown in the system tray.
+ * @param data    Key-value data payload forwarded to the Flutter app.
+ */
+async function sendFcmToUser(
+  userId: string,
+  title: string,
+  body: string,
+  data: Record<string, string>
+): Promise<void> {
+  if (!userId || !userId.trim()) return;
+
+  try {
+    const tokensSnapshot = await db
+      .collection("users")
+      .doc(userId.trim())
+      .collection("fcmTokens")
+      .where("enabled", "==", true)
+      .get();
+
+    if (tokensSnapshot.empty) return;
+
+    const tokenDocs = tokensSnapshot.docs.filter((doc) => {
+      const token = doc.data()?.token;
+      return typeof token === "string" && token.trim().length > 0;
+    });
+
+    if (tokenDocs.length === 0) return;
+
+    // FCM sendEachForMulticast supports a maximum of 500 tokens per call
+    const chunkSize = 500;
+    for (let i = 0; i < tokenDocs.length; i += chunkSize) {
+      const chunk = tokenDocs.slice(i, i + chunkSize);
+      const tokens = chunk.map((doc) => doc.data().token as string);
+
+      const response = await messaging.sendEachForMulticast({
+        tokens,
+        notification: { title, body },
+        data,
+        android: { notification: { channelId: "order_updates" } },
+        apns: { payload: { aps: { sound: "default" } } },
+      });
+
+      // Remove stale tokens so future sends stay clean
+      const deletePromises: Promise<admin.firestore.WriteResult>[] = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          const code = resp.error?.code ?? "";
+          if (
+            code === "messaging/registration-token-not-registered" ||
+            code === "messaging/invalid-registration-token"
+          ) {
+            deletePromises.push(chunk[idx].ref.delete());
+          }
+        }
+      });
+      if (deletePromises.length > 0) await Promise.allSettled(deletePromises);
+
+      logger.info("sendFcmToUser: FCM push dispatched", {
+        userId,
+        tokenCount: tokens.length,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+      });
+    }
+  } catch (error) {
+    logger.warn("sendFcmToUser: FCM dispatch failed (non-critical)", {
+      userId,
+      error: (error as any)?.message,
+    });
+  }
+}
+
+/**
+ * @helper sendFcmToAdmins
+ * @purpose Queries all admin/owner users, collects their FCM tokens, and dispatches a push.
+ *   Deduplicates tokens across multiple admins and devices.
+ *   Automatically deletes expired or invalid tokens from Firestore.
+ *   Never throws — all errors are logged as warnings.
+ * @param title   Notification title shown in the system tray.
+ * @param body    Notification body shown in the system tray.
+ * @param data    Key-value data payload forwarded to the Flutter app.
+ */
+async function sendFcmToAdmins(
+  title: string,
+  body: string,
+  data: Record<string, string>
+): Promise<void> {
+  try {
+    const adminsSnapshot = await db
+      .collection("users")
+      .where("role", "in", ["admin", "owner"])
+      .get();
+
+    if (adminsSnapshot.empty) return;
+
+    // Fetch FCM token subcollections for all admins in parallel
+    const tokenFetches = adminsSnapshot.docs.map((adminDoc) =>
+      db
+        .collection("users")
+        .doc(adminDoc.id)
+        .collection("fcmTokens")
+        .where("enabled", "==", true)
+        .get()
+    );
+
+    const tokenResults = await Promise.allSettled(tokenFetches);
+
+    const allTokenDocs: admin.firestore.QueryDocumentSnapshot[] = [];
+    const seenTokens = new Set<string>();
+
+    for (const result of tokenResults) {
+      if (result.status !== "fulfilled") continue;
+      for (const doc of result.value.docs) {
+        const token = doc.data()?.token;
+        if (typeof token !== "string" || !token.trim() || seenTokens.has(token)) continue;
+        seenTokens.add(token);
+        allTokenDocs.push(doc);
+      }
+    }
+
+    if (allTokenDocs.length === 0) return;
+
+    // FCM sendEachForMulticast supports a maximum of 500 tokens per call
+    const chunkSize = 500;
+    for (let i = 0; i < allTokenDocs.length; i += chunkSize) {
+      const chunk = allTokenDocs.slice(i, i + chunkSize);
+      const tokens = chunk.map((doc) => doc.data().token as string);
+
+      const response = await messaging.sendEachForMulticast({
+        tokens,
+        notification: { title, body },
+        data,
+        android: { notification: { channelId: "order_updates" } },
+        apns: { payload: { aps: { sound: "default" } } },
+      });
+
+      // Remove stale tokens so future sends stay clean
+      const deletePromises: Promise<admin.firestore.WriteResult>[] = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          const code = resp.error?.code ?? "";
+          if (
+            code === "messaging/registration-token-not-registered" ||
+            code === "messaging/invalid-registration-token"
+          ) {
+            deletePromises.push(chunk[idx].ref.delete());
+          }
+        }
+      });
+      if (deletePromises.length > 0) await Promise.allSettled(deletePromises);
+
+      logger.info("sendFcmToAdmins: FCM push dispatched", {
+        adminCount: adminsSnapshot.size,
+        tokenCount: tokens.length,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+      });
+    }
+  } catch (error) {
+    logger.warn("sendFcmToAdmins: FCM dispatch failed (non-critical)", {
+      error: (error as any)?.message,
+    });
+  }
+}
 
 function generateOrderSearchTokens(values: string[]): string[] {
   const tokens = new Set<string>();
