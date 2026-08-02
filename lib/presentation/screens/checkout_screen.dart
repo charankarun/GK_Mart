@@ -89,8 +89,13 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       nameController.text = profile.name.trim();
       phoneController.text = _normalizedPhoneOrOriginal(profile.phone);
       final seedAddress = activeAddress.isNotEmpty ? activeAddress : profile.address.trim();
-      addressController.text = seedAddress;
-      pincodeController.text = _extractPincode(seedAddress);
+      // Bug 1 fix: parse the stored address so the 'Pincode: ...' line is
+      // separated into pincodeController — preventing duplicate pincode display.
+      final parsed = ParsedAddress.from(seedAddress);
+      addressController.text = _buildDisplayAddress(parsed);
+      pincodeController.text = parsed.pincode.isNotEmpty
+          ? parsed.pincode
+          : _extractPincode(seedAddress);
     }
 
     final syncState = ref.watch(cartSyncProvider);
@@ -353,7 +358,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       final serviceablePincodes = ref.read(serviceablePincodesProvider);
       if (!serviceablePincodes.contains(pincode)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Delivery is not available here')),
+          const SnackBar(content: Text('Sorry! Delivery is currently available only in Pincode 515301.')),
         );
         setState(() {
           isEditingDetails = true;
@@ -532,9 +537,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   }
 
   Future<void> _openAddressScreen() async {
+    // Bug 2 fix: open AddressScreen in selection mode so tapping a card
+    // immediately returns the address instead of opening the edit form.
     final savedAddress = await Navigator.push<String>(
       context,
-      MaterialPageRoute(builder: (_) => const AddressScreen()),
+      MaterialPageRoute(builder: (_) => const AddressScreen(selectMode: true)),
     );
 
     if (!mounted) return;
@@ -542,9 +549,16 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
     ref.read(activeAddressProvider.notifier).selectAddress(savedAddress.trim());
 
-    addressController.text = savedAddress.trim();
-    final pincode = _extractPincode(savedAddress);
-    if (pincode.isNotEmpty) pincodeController.text = pincode;
+    // Bug 1 fix: strip the 'Pincode: ...' line from the address text so the
+    // pincode field is the only place it appears.
+    final parsed = ParsedAddress.from(savedAddress.trim());
+    addressController.text = _buildDisplayAddress(parsed);
+    if (parsed.pincode.isNotEmpty) {
+      pincodeController.text = parsed.pincode;
+    } else {
+      final pincode = _extractPincode(savedAddress);
+      if (pincode.isNotEmpty) pincodeController.text = pincode;
+    }
   }
 
   void _showAllItemsBottomSheet(BuildContext context, List<CartItem> items) {
@@ -571,6 +585,16 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   String _extractPincode(String address) {
     final match = RegExp(r'\b[0-9]{6}\b').firstMatch(address);
     return match?.group(0) ?? '';
+  }
+
+  /// Reconstructs a display-ready address string from a [ParsedAddress],
+  /// including the landmark line but NOT the pincode line.
+  String _buildDisplayAddress(ParsedAddress parsed) {
+    final parts = <String>[parsed.address];
+    if (parsed.landmark.isNotEmpty) {
+      parts.add('${AddressText.landmarkPrefix} ${parsed.landmark}');
+    }
+    return parts.join('\n');
   }
 
   String _normalizedPhoneOrOriginal(String value) {
@@ -1159,6 +1183,7 @@ class _CheckoutInput extends StatelessWidget {
         labelText: label,
         alignLabelWithHint: maxLines > 1,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        errorMaxLines: 3,
       ),
     );
   }
@@ -1828,7 +1853,7 @@ class CheckoutText {
   static const requiredField = 'Required';
   static const invalidPhone = 'Enter a valid 10-digit phone number';
   static const invalidPincode = 'Enter a valid 6-digit pincode';
-  static const unserviceablePincode = 'Delivery is not available here';
+  static const unserviceablePincode = 'Sorry! Delivery is currently available only in Pincode 515301.';
 }
 
 const _checkoutOrderLogName = 'CheckoutOrder';

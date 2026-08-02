@@ -125,11 +125,7 @@ final orderDetailsProvider =
 
 final serviceablePincodesProvider = Provider<Set<String>>((ref) {
   return const {
-    '560001',
-    '560002',
-    '560003',
-    '560004',
-    '560005',
+    '515301',
   };
 });
 

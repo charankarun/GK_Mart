@@ -9,7 +9,12 @@ import '../providers/repository_providers.dart';
 import '../widgets/app_state_widgets.dart';
 
 class AddressScreen extends ConsumerStatefulWidget {
-  const AddressScreen({super.key});
+  const AddressScreen({super.key, this.selectMode = false});
+
+  /// When true the screen is opened from Checkout for address selection.
+  /// Tapping an address card pops the route with the selected address string
+  /// instead of opening the edit form.
+  final bool selectMode;
 
   @override
   ConsumerState<AddressScreen> createState() => _AddressScreenState();
@@ -69,7 +74,9 @@ class _AddressScreenState extends ConsumerState<AddressScreen> {
 
           return _AddressListView(
             savedAddresses: savedAddresses,
+            selectMode: widget.selectMode,
             onAddAddress: _openAddAddress,
+            onSelectAddress: (address) => Navigator.pop(context, address),
             onEditAddress: _openEditAddress,
           );
         },
@@ -230,12 +237,16 @@ class _AddressScreenState extends ConsumerState<AddressScreen> {
 class _AddressListView extends StatelessWidget {
   const _AddressListView({
     required this.savedAddresses,
+    required this.selectMode,
     required this.onAddAddress,
+    required this.onSelectAddress,
     required this.onEditAddress,
   });
 
   final List<String> savedAddresses;
+  final bool selectMode;
   final VoidCallback onAddAddress;
+  final void Function(String address) onSelectAddress;
   final void Function(int index, String address) onEditAddress;
 
   @override
@@ -272,6 +283,8 @@ class _AddressListView extends StatelessWidget {
             _SavedAddressCard(
               address: savedAddresses[index],
               isDefault: index == 0,
+              selectMode: selectMode,
+              onSelect: () => onSelectAddress(savedAddresses[index]),
               onEdit: () => onEditAddress(index, savedAddresses[index]),
             ),
             if (index != savedAddresses.length - 1) const SizedBox(height: 12),
@@ -333,11 +346,17 @@ class _SavedAddressCard extends StatelessWidget {
   const _SavedAddressCard({
     required this.address,
     required this.isDefault,
+    required this.selectMode,
+    required this.onSelect,
     required this.onEdit,
   });
 
   final String address;
   final bool isDefault;
+  /// True when opened from Checkout for selection.
+  final bool selectMode;
+  /// Called when the card is tapped in select mode.
+  final VoidCallback onSelect;
   final VoidCallback onEdit;
 
   @override
@@ -347,7 +366,7 @@ class _SavedAddressCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadii.lg),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        onTap: onEdit,
+        onTap: selectMode ? onSelect : onEdit,
         child: Container(
           padding: const EdgeInsets.all(AppSpacing.lg),
           decoration: BoxDecoration(
@@ -400,6 +419,7 @@ class _SavedAddressCard extends StatelessWidget {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
+                        // Always open the edit form, regardless of selectMode.
                         onPressed: onEdit,
                         icon: const Icon(
                           Icons.edit_location_alt_rounded,
@@ -777,8 +797,12 @@ class AddressText {
   static const loadError = 'Unable to load saved addresses';
   static const loadErrorSubtitle = 'Please try again in a moment.';
   static const manageAddress = 'Manage delivery addresses';
-  static const helper =
+  static const helperBrowse =
       'Tap an address to update it. The first one is default.';
+  static const helperSelect =
+      'Tap an address to use it for this order.';
+  /// Legacy alias kept for compatibility.
+  static const helper = helperBrowse;
   static const savedAddresses = 'Saved Addresses';
   static const savedAddress = 'Saved Address';
   static const defaultAddress = 'Default Address';
