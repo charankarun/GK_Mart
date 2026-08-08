@@ -236,12 +236,18 @@ class AccountPage extends ConsumerWidget {
     if (loadingNotifier.state) return;
 
     loadingNotifier.state = true;
+    
+    // Capture dependencies before any async gap
+    final authRepository = ref.read(authRepositoryProvider);
+    final adminModeNotifier = ref.read(adminModeProvider.notifier);
+    final currentSession = ref.read(currentSessionProvider);
+
     try {
-      ref.read(adminModeProvider.notifier).disable();
+      adminModeNotifier.disable();
       await NotificationService.instance.unregisterDeviceForUser(
-        ref.read(currentSessionProvider)?.uid ?? '',
+        currentSession?.uid ?? '',
       );
-      await ref.read(authRepositoryProvider).signOut();
+      await authRepository.signOut();
     } catch (error) {
       if (!context.mounted) return;
 
