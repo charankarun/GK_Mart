@@ -1,16 +1,3 @@
-// ==============================================================================
-// FILE: lib/presentation/providers/order_providers.dart
-// PURPOSE: Riverpod state providers and controllers managing order interactions.
-// LAYER: Presentation / Providers (State Management)
-// DEPENDENCIES: OrderRepository, flutter_riverpod
-//
-// ARCHITECTURAL ROLE:
-// Exposes order data streams (e.g. userOrdersProvider), order analytics calculations
-// (orderAnalyticsProvider), state controllers for paginated customer and admin list views
-// (UserOrderListController, AdminOrderListController), and the transactional coordinator
-// (OrderCreationController) that submits order creations and monitors database triggers.
-// ==============================================================================
-
 import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:io';
@@ -27,7 +14,6 @@ import '../../domain/entities/order_page.dart';
 import 'repository_providers.dart';
 import 'role_provider.dart';
 
-/// Real-time stream of the current customer's order history.
 final userOrdersProvider =
     StreamProvider.family<List<Order>, String>((ref, userId) {
   return ref.watch(orderRepositoryProvider).watchUserOrders(userId);
@@ -48,8 +34,7 @@ final orderAnalyticsProvider =
   (ref, date) async {
     final permissions = ref.watch(userPermissionsProvider);
     if (!permissions.canViewAnalytics) {
-      throw const RepositoryException(
-          'Access denied. Insufficient permissions.');
+      throw const RepositoryException('Access denied. Insufficient permissions.');
     }
     _dashboardLog(
       'Riverpod orderAnalyticsProvider start date=${date.toIso8601String()}',
@@ -126,12 +111,12 @@ final adminDateOrderListProvider = StateNotifierProvider.autoDispose
   (ref, date) {
     final permissions = ref.watch(userPermissionsProvider);
     if (!permissions.canManageOrders) {
-      throw const RepositoryException(
-          'Access denied. Insufficient permissions.');
+      throw const RepositoryException('Access denied. Insufficient permissions.');
     }
     return AdminDateOrderListController(ref, _dateOnly(date))..loadInitial();
   },
 );
+
 
 final orderDetailsProvider =
     StreamProvider.family<Order?, String>((ref, orderId) {
@@ -139,7 +124,9 @@ final orderDetailsProvider =
 });
 
 final serviceablePincodesProvider = Provider<Set<String>>((ref) {
-  return const {'515301'};
+  return const {
+    '515301',
+  };
 });
 
 final orderCreationControllerProvider =
@@ -182,12 +169,11 @@ class OrderCreationController extends StateNotifier<AsyncValue<String?>> {
       final orderId = await _ref.read(orderRepositoryProvider).createOrder(
             request,
           );
-
+      
       final completer = Completer<String>();
       StreamSubscription<Order?>? subscription;
-
-      subscription =
-          _ref.read(orderRepositoryProvider).watchOrder(orderId).listen(
+      
+      subscription = _ref.read(orderRepositoryProvider).watchOrder(orderId).listen(
         (order) {
           if (order == null) return;
           if (order.status == 'Placed') {
@@ -197,8 +183,7 @@ class OrderCreationController extends StateNotifier<AsyncValue<String?>> {
             subscription?.cancel();
             completer.completeError(
               RepositoryException(
-                order.failureReason ??
-                    'Validation Failed. Please place the order again.',
+                order.failureReason ?? 'Validation Failed. Please place the order again.',
               ),
             );
           }
@@ -222,8 +207,7 @@ class OrderCreationController extends StateNotifier<AsyncValue<String?>> {
       );
 
       state = AsyncData(resultOrderId);
-      _orderCreationLog(
-          'Controller createOrder success orderId=$resultOrderId.');
+      _orderCreationLog('Controller createOrder success orderId=$resultOrderId.');
       return resultOrderId;
     } catch (error, stackTrace) {
       state = AsyncError(error, stackTrace);
@@ -341,8 +325,7 @@ class UserOrderListController
             .watchOrder(orderId)
             .listen((updatedOrder) {
           if (updatedOrder == null) return;
-          if (updatedOrder.status != OrderStatus.pending ||
-              updatedOrder.orderId != null) {
+          if (updatedOrder.status != OrderStatus.pending || updatedOrder.orderId != null) {
             // Update the state locally when the order transitions
             _updateLocalOrderState(updatedOrder);
             // Cancel subscription since it transitioned

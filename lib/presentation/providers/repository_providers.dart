@@ -4,6 +4,7 @@ import '../../core/firebase/firebase_providers.dart';
 import '../../data/repositories/category_repository_impl.dart';
 import '../../data/repositories/firebase_auth_repository.dart';
 import '../../data/repositories/firebase_phone_auth_repository.dart';
+import '../../data/repositories/msg91_phone_auth_repository.dart';
 import '../../data/repositories/firestore_admin_repository.dart';
 import '../../data/repositories/firestore_cart_repository.dart';
 import '../../data/repositories/firestore_order_repository.dart';
@@ -35,9 +36,17 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   );
 });
 
-final phoneAuthRepositoryProvider = Provider<PhoneAuthRepository>((ref) {
+final gtPhoneAuthRepositoryProvider = Provider<PhoneAuthRepository>((ref) {
   return FirebasePhoneAuthRepository(
     auth: ref.watch(firebaseAuthProvider),
+    userRepository: ref.watch(userRepositoryProvider),
+  );
+});
+
+final msg91PhoneAuthRepositoryProvider = Provider<Msg91PhoneAuthRepository>((ref) {
+  return Msg91PhoneAuthRepository(
+    auth: ref.watch(firebaseAuthProvider),
+    functions: ref.watch(firebaseFunctionsProvider),
     userRepository: ref.watch(userRepositoryProvider),
   );
 });

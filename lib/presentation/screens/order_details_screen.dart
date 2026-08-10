@@ -217,7 +217,24 @@ class OrderDetailsScreen extends ConsumerWidget {
                     'Date: ${order.createdAt!.toString().substring(0, 16)}',
                     style: const TextStyle(fontSize: 14, color: Colors.grey),
                   ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 16),
+                const Text(
+                  'Delivery Address',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  [
+                    order.address.trim().isNotEmpty ? order.address.trim() : 'No delivery address added',
+                    if (order.pincode.trim().isNotEmpty) 'Pincode: ${order.pincode.trim()}',
+                  ].join('\n'),
+                  style: const TextStyle(
+                    fontSize: 14, 
+                    color: Color(0xFF374151), 
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 16),
                 const Text(
                   'Items',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),

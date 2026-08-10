@@ -726,8 +726,14 @@ class _PromoBanner extends StatelessWidget {
           aspectRatio: 16 / 6,
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final bw = constraints.maxWidth;
-              final bh = constraints.maxHeight;
+              final w = constraints.maxWidth;
+              final h = constraints.maxHeight;
+              // Image starts at 46% of banner width — left 46% is always clean text space.
+              // ShaderMask fades the left 30% of the image box, so visible product pixels
+              // only start at ~60% of total banner width. Text is capped at 52%, giving a
+              // comfortable invisible buffer between text and any visible product.
+              final imageStart = w * 0.46;
+
               return Container(
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
@@ -737,9 +743,8 @@ class _PromoBanner extends StatelessWidget {
                   ),
                 ),
                 child: Stack(
-                  clipBehavior: Clip.hardEdge,
                   children: [
-                    // ── Decorative background circles ──────────────────────
+                    // ── Decorative ambient circles ─────────────────────────────
                     Positioned(
                       right: -40,
                       top: -40,
@@ -747,7 +752,7 @@ class _PromoBanner extends StatelessWidget {
                         width: 180,
                         height: 180,
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.07),
+                          color: Colors.white.withValues(alpha: 0.08),
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -759,133 +764,161 @@ class _PromoBanner extends StatelessWidget {
                         width: 100,
                         height: 100,
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.04),
+                          color: Colors.white.withValues(alpha: 0.05),
                           shape: BoxShape.circle,
                         ),
                       ),
                     ),
-
-                    // ── Grocery products — right side, fills full banner height ──
+                    // ── Soft radial glow behind the products ──────────────────
                     Positioned(
-                      right: 0,
+                      left: imageStart - 20,
                       top: 0,
-                      width: bw * 0.56,
-                      height: bh,
-                      child: Image.asset(
-                        HomeText.bannerAsset,
-                        fit: BoxFit.cover,
-                        alignment: Alignment.centerLeft,
-                      ),
-                    ),
-
-                    // ── Gradient: dark-green → transparent (left → right) ──
-                    // Keeps text crisp; products visible on the right
-                    Positioned.fill(
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
+                      right: 0,
+                      bottom: 0,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: RadialGradient(
                             colors: [
-                              Color(0xFF0C8346),       // solid green
-                              Color(0xFF0C8346),       // hold solid to 40%
-                              Color(0x880D9955),       // semi-transparent
-                              Color(0x000D9955),       // fully transparent
+                              Colors.white.withValues(alpha: 0.07),
+                              Colors.transparent,
                             ],
-                            stops: [0.0, 0.38, 0.55, 0.70],
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight,
+                            center: Alignment.centerRight,
+                            radius: 1.2,
                           ),
                         ),
                       ),
                     ),
-
-                    // ── Text content — left side ──────────────────────────
+                    // ── Grocery products — fade-in from left edge ─────────────
                     Positioned(
-                      left: 0,
-                      top: 0,
+                      left: imageStart,
+                      top: -(h * 0.08),
+                      right: -14,
+                      bottom: -(h * 0.06),
+                      child: ShaderMask(
+                        shaderCallback: (rect) => const LinearGradient(
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                          // Transparent at 0%, fully opaque by 30% of the image box.
+                          // This means products only appear from ~60% of the total
+                          // banner width, well clear of any text.
+                          stops: [0.0, 0.30, 1.0],
+                          colors: [
+                            Colors.transparent,
+                            Colors.white,
+                            Colors.white,
+                          ],
+                        ).createShader(rect),
+                        blendMode: BlendMode.dstIn,
+                        child: Image.asset(
+                          HomeText.bannerAsset,
+                          fit: BoxFit.contain,
+                          alignment: Alignment.bottomRight,
+                        ),
+                      ),
+                    ),
+                    // ── Ground shadow beneath the products ───────────────────
+                    Positioned(
+                      left: imageStart,
+                      right: 0,
                       bottom: 0,
-                      width: bw * 0.52,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: AppColors.accent,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: const Text(
-                                  'FAST DELIVERY',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 8.5,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              const Text(
-                                'Everyday Essentials',
-                                maxLines: 1,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w900,
-                                  height: 1.1,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              const Text(
-                                'Best Prices Guaranteed',
-                                maxLines: 1,
-                                style: TextStyle(
-                                  color: AppColors.softGreen,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              InkWell(
-                                onTap: onShopNow,
-                                borderRadius: BorderRadius.circular(6),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 5),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: const Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        'Shop Now',
-                                        style: TextStyle(
-                                          color: AppColors.primary,
-                                          fontSize: 10.5,
-                                          fontWeight: FontWeight.w900,
-                                        ),
-                                      ),
-                                      SizedBox(width: 4),
-                                      Icon(
-                                        Icons.arrow_forward_ios_rounded,
-                                        color: AppColors.primary,
-                                        size: 9,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
+                      child: Container(
+                        height: h * 0.35,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.14),
                             ],
                           ),
+                        ),
+                      ),
+                    ),
+                    // ── Marketing text — strictly left 52% of banner ──────────
+                    Positioned(
+                      left: 16,
+                      top: 0,
+                      bottom: 0,
+                      right: w * 0.48,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: AppColors.accent,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'FAST DELIVERY',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Everyday Essentials',
+                              maxLines: 1,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                height: 1.1,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            const Text(
+                              'Best Prices Guaranteed',
+                              maxLines: 1,
+                              style: TextStyle(
+                                color: AppColors.softGreen,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            InkWell(
+                              onTap: onShopNow,
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'Shop Now',
+                                      style: TextStyle(
+                                        color: AppColors.primary,
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    SizedBox(width: 4),
+                                    Icon(
+                                      Icons.arrow_forward_ios_rounded,
+                                      color: AppColors.primary,
+                                      size: 9,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

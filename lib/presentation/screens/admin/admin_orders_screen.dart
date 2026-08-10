@@ -689,9 +689,15 @@ class _AdminOrderCard extends StatelessWidget {
             const SizedBox(height: 12),
             _InfoBlock(
               label: 'Delivery address',
-              value: _fallback(order.address, 'No delivery address added'),
+              value: _fallback(
+                [
+                  order.address.trim(),
+                  if (order.pincode.trim().isNotEmpty) 'Pincode: ${order.pincode.trim()}',
+                ].where((s) => s.isNotEmpty).join('\n'),
+                'No delivery address added',
+              ),
               icon: Icons.location_on_outlined,
-              maxLines: 5,
+              maxLines: 6,
             ),
             const SizedBox(height: 12),
             _ExpandedInfoSection(

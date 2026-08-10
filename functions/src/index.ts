@@ -1,68 +1,31 @@
-/**
- * ==============================================================================
- * FILE: functions/src/index.ts
- * PURPOSE: Firebase Cloud Functions for backend business logic, validation, and analytics.
- * LAYER: Backend / Cloud Infrastructure
- * DEPENDENCIES: firebase-admin, firebase-functions
- * 
- * ARCHITECTURE NOTES:
- * 
- *   Customer (App)
- *       │
- *       ▼ [Direct Firestore Write]
- *   Creates "Pending" Order
- *       │
- *       ▼ [Firestore Document Trigger: onDocumentCreated]
- *   processPendingOrder (Cloud Function)
- *       ├── 1. Reads catalog products in a Firestore Transaction
- *       ├── 2. Performs SECURITY CHECK: Validates catalog prices against client prices
- *       ├── 3. Performs STOCK CHECK: Validates inventory availability
- *       ├── 4. Increments order counter & assigns official Order ID (e.g., GK00001)
- *       ├── 5. Updates catalog inventory (reduces stock, marks unavailable if 0)
- *       ├── 6. Transitions order status to "Placed"
- *       └── 7. Dispatches deterministic notifications (Customer & Admin logs)
- *       │
- *       ▼ [Client Listener]
- *   Customer App hears status change to "Placed" & completes checkout.
- * 
- * IDEMPOTENCY & FAULT TOLERANCE:
- * - Order processing uses a single consolidated Transaction. If stock check, price validation,
- *   or ID generation fails, the entire transaction reverts and the order transitions to "Failed".
- * - Cron jobs (cleanupStuckOrders) clean up lingering "Pending" orders that timed out.
- * ==============================================================================
- */
-
 import * as functions from "firebase-functions/v2";
 import { logger } from "firebase-functions/v2";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as v1 from "firebase-functions/v1";
 import * as admin from "firebase-admin";
+let _appInitialized = false;
+function initAdmin() {
+  if (!_appInitialized) {
+    admin.initializeApp();
+    _appInitialized = true;
+  }
+}
 
-admin.initializeApp();
-const db = admin.firestore();
+const db = new Proxy({} as admin.firestore.Firestore, {
+  get: (target, prop) => {
+    initAdmin();
+    return (admin.firestore() as any)[prop];
+  }
+});
 
-/**
- * @function processPendingOrder
- * @trigger Firestore - onDocumentCreated ("orders/{orderId}")
- * @purpose Handles validation, stock deduction, official ID generation, and transitions order from Pending to Placed.
- * @inputs event - Firestore Event containing the raw pending order data.
- * @outputs Promise<void> - Completes when transaction finishes and notifications are dispatched.
- * @transactionFlow
- *   - Fetches product details in read-phase.
- *   - Validates client prices/discount/subtotal against authoritative catalog values.
- *   - Verifies stock and locks quantities.
- *   - Atomically increments orders counter.
- *   - Updates product stock levels.
- *   - Updates order document with official order identifier and "Placed" status.
- * @failureHandling
- *   - Any error during validation/transaction reverts all changes and updates the order status to "Failed" with failureReason.
- * @securityConsiderations
- *   - Client prices are never trusted. All calculations are validated on the backend.
- *   - Prevents stock-tampering and race conditions by operating inside a transaction.
- * @sideEffects
- *   - Dispatches notification documents to /notifications for customer and admins.
- */
+const messaging = new Proxy({} as admin.messaging.Messaging, {
+  get: (target, prop) => {
+    initAdmin();
+    return (admin.messaging() as any)[prop];
+  }
+});
+
 export const processPendingOrder = functions.firestore.onDocumentCreated(
   "orders/{orderId}",
   async (event) => {
@@ -153,10 +116,6 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         expectedProductSavings = Math.round(expectedProductSavings * 100) / 100;
 
         // Calculate expected cartDiscount
-        // BUSINESS RULE: Cart Discount thresholds
-        // OriginalAmount >= 4000: ₹150 off
-        // OriginalAmount >= 3000: ₹100 off
-        // OriginalAmount >= 2000: ₹50 off
         let expectedCartDiscount = 0;
         if (expectedOriginalAmount >= 4000) {
           expectedCartDiscount = 150;
@@ -167,7 +126,6 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         }
 
         // Calculate expected deliveryFee
-        // BUSINESS RULE: Free delivery on orders >= ₹699. Otherwise flat ₹50.
         const expectedDeliveryFee = expectedOriginalAmount >= 699 ? 0 : 50;
 
         // Calculate expected final totals
@@ -234,15 +192,14 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
           throw new Error("Product price has changed. Please place the order again.");
         }
 
+
         // 3. Read counter and generate official ID
-        // SECURITY & PERFORMANCE: Order counter sequencing handles collisions sequentially.
         const counterRef = db.collection("counters").doc("orders");
         const counterDoc = await transaction.get(counterRef);
         const nextNumber = counterDoc.exists ? (counterDoc.data()?.next || 2) : 2;
         const officialOrderId = `GK${nextNumber.toString().padStart(5, '0')}`;
 
         // 4. Update stock
-        // BUSINESS RULE: Deduct product quantity from inventory and disable item if stock hits 0.
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
           const productDoc = productDocs[i];
@@ -272,7 +229,6 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         }, { merge: true });
 
         // 6. Update order status and official ID
-        // PERFORMANCE: Generate search tokens for admin order management search.
         const searchValues = [
           officialOrderId,
           order.userName || order.customerName || "",
@@ -347,6 +303,19 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         });
 
         await batch.commit();
+
+        // FCM push delivery — runs after Firestore write, never blocks order flow
+        await sendFcmToUser(
+          order.userId,
+          title,
+          body,
+          { type: "customer_order_placed", orderId: event.params.orderId, status: "placed", amount: amountStr }
+        );
+        await sendFcmToAdmins(
+          `New Order: ${generatedOrderId}`,
+          adminBody,
+          { type: "admin_new_order", orderId: event.params.orderId, status: "placed", amount: amountStr }
+        );
       } catch (error) {
         logger.warn("processPendingOrder: notification dispatch failed (non-critical)", { functionName: "processPendingOrder", orderId: event.params.orderId, officialOrderId: generatedOrderId, operation: "notification_dispatch", error: (error as any)?.message });
       }
@@ -362,19 +331,6 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
   }
 );
 
-/**
- * @function processOrderCancellation
- * @trigger Firestore - onDocumentUpdated ("orders/{orderId}")
- * @purpose Handles restocking products when an order transitions to Cancellation_Requested or Cancelled.
- * @inputs event - Firestore Event with before and after state documents.
- * @outputs Promise<void> - Completes when inventory restoration is completed.
- * @transactionFlow
- *   - Evaluates if the order had stock deducted (status transitions from valid validation states).
- *   - Restores item quantities back to database using increments.
- *   - Automatically flags products as 'available' if stock quantity rises above 0.
- * @securityConsiderations
- *   - Idempotency check: Rejects stock restoration if order was already cancelled.
- */
 export const processOrderCancellation = functions.firestore.onDocumentUpdated(
   "orders/{orderId}",
   async (event) => {
@@ -455,12 +411,6 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
   }
 );
 
-/**
- * @function processOrderStatusUpdate
- * @trigger Firestore - onDocumentUpdated ("orders/{orderId}")
- * @purpose Dispatches push notifications to customer subcollections on order progress changes.
- * @inputs event - Firestore Event with before and after state documents.
- */
 export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
   "orders/{orderId}",
   async (event) => {
@@ -503,6 +453,14 @@ export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         isRead: false
       });
+
+      // FCM push delivery — runs after Firestore write, never blocks order flow
+      await sendFcmToUser(
+        targetUserId,
+        `Order ${status}`,
+        `Your order is now ${status}.`,
+        { type: "order_status", orderId: orderId, status: normalizedStatus }
+      );
       logger.info("processOrderStatusUpdate: status notification dispatched", { functionName: "processOrderStatusUpdate", orderId, status, eventType: `status_${normalizedStatus}`, targetUserId, operation: "notification_dispatch" });
     } catch (error) {
       logger.warn("processOrderStatusUpdate: notification dispatch failed (non-critical)", { functionName: "processOrderStatusUpdate", orderId, status, targetUserId, operation: "notification_dispatch", error: (error as any)?.message });
@@ -510,11 +468,6 @@ export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
   }
 );
 
-/**
- * @function cleanupStuckOrders
- * @trigger Cloud Scheduler Cron - "every 15 minutes"
- * @purpose Traverses and fails orders trapped in "Pending" for >15 minutes to unlock resources.
- */
 export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) => {
   const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
 
@@ -540,7 +493,6 @@ export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) =
       });
       count++;
 
-      // PERFORMANCE: Respect Firestore batch operation size limitations of 500 writes max.
       if (count === 500) {
         await batch.commit();
         batch = db.batch();
@@ -558,11 +510,6 @@ export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) =
   }
 });
 
-/**
- * @function processUserDeletion
- * @trigger Auth - onDelete
- * @purpose Wipes user metadata folders and redacts sensitive customer references from historical orders.
- */
 export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
   const uid = user.uid;
 
@@ -612,11 +559,8 @@ export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
 }
 );
 
-/**
- * @function processProductWrite
- * @trigger Firestore - onDocumentWritten ("products/{productId}")
- * @purpose Syncs counters in administrative dashboard_stats upon catalog product updates.
- */
+
+
 export const processProductWrite = functions.firestore.onDocumentWritten(
   "products/{productId}",
   async (event) => {
@@ -674,11 +618,6 @@ export const processProductWrite = functions.firestore.onDocumentWritten(
   }
 );
 
-/**
- * @function processCategoryWrite
- * @trigger Firestore - onDocumentWritten ("categories/{categoryId}")
- * @purpose Syncs total categories count in administrative dashboard_stats.
- */
 export const processCategoryWrite = functions.firestore.onDocumentWritten(
   "categories/{categoryId}",
   async (event) => {
@@ -702,13 +641,6 @@ export const processCategoryWrite = functions.firestore.onDocumentWritten(
   }
 );
 
-/**
- * @function recalibrateInventoryStats
- * @trigger Callable onCall
- * @purpose Recalculates stats values from products collection to resolve counts mismatches.
- * @securityConsiderations
- *   - Restricts execution strictly to authenticated owners or administrative UIDs.
- */
 export const recalibrateInventoryStats = onCall(
   async (request) => {
     if (!request.auth) {
@@ -778,11 +710,6 @@ export const recalibrateInventoryStats = onCall(
   }
 );
 
-/**
- * @function processOrderWrite
- * @trigger Firestore - onDocumentWritten ("orders/{orderId}")
- * @purpose Syncs total revenue, total orders, and pending orders indicators inside order_analytics document.
- */
 export const processOrderWrite = functions.firestore.onDocumentWritten(
   "orders/{orderId}",
   async (event) => {
@@ -870,13 +797,6 @@ export const processOrderWrite = functions.firestore.onDocumentWritten(
   }
 );
 
-/**
- * @function recalibrateOrderAnalytics
- * @trigger Callable onCall
- * @purpose Recalculates metrics (revenue, totals, statuses) from scratch based on orders logs to correct analytical offsets.
- * @securityConsiderations
- *   - Restricts execution strictly to authenticated owners or administrative accounts.
- */
 export const recalibrateOrderAnalytics = onCall(
   async (request) => {
     if (!request.auth) {
@@ -970,17 +890,6 @@ export const recalibrateOrderAnalytics = onCall(
   }
 );
 
-/**
- * @function processAuthoritativeAnalytics
- * @trigger Firestore - onDocumentUpdated ("orders/{orderId}")
- * @purpose Captures transitions from Pending -> Placed and logs official revenues in a separate ledger.
- * @transactionFlow
- *   - Verifies if the order has been logged previously in analytics_ledger.
- *   - Writes receipt record to analytics_ledger for idempotency.
- *   - Increments authoritative revenue metrics inside system_stats.
- * @securityConsiderations
- *   - Uses an idempotency check record so that a duplicated order trigger does not register duplicate revenue.
- */
 export const processAuthoritativeAnalytics = functions.firestore.onDocumentUpdated(
   "orders/{orderId}",
   async (event) => {
@@ -1041,11 +950,177 @@ export const processAuthoritativeAnalytics = functions.firestore.onDocumentUpdat
 );
 
 /**
- * @function generateOrderSearchTokens
- * @purpose Utility function to build a searchable prefix/substring token list from order parameters.
- * @inputs values - Array of raw strings to tokenize (Order ID, client details, items).
- * @outputs string[] - List of unique alphanumeric tokens matching search bounds.
+ * @helper sendFcmToUser
+ * @purpose Reads all valid FCM tokens for a single user and dispatches a FCM push.
+ *   Automatically deletes expired or invalid tokens from Firestore.
+ *   Never throws — all errors are logged as warnings.
+ * @param userId  Firestore UID of the target user.
+ * @param title   Notification title shown in the system tray.
+ * @param body    Notification body shown in the system tray.
+ * @param data    Key-value data payload forwarded to the Flutter app.
  */
+async function sendFcmToUser(
+  userId: string,
+  title: string,
+  body: string,
+  data: Record<string, string>
+): Promise<void> {
+  if (!userId || !userId.trim()) return;
+
+  try {
+    const tokensSnapshot = await db
+      .collection("users")
+      .doc(userId.trim())
+      .collection("fcmTokens")
+      .where("enabled", "==", true)
+      .get();
+
+    if (tokensSnapshot.empty) return;
+
+    const tokenDocs = tokensSnapshot.docs.filter((doc) => {
+      const token = doc.data()?.token;
+      return typeof token === "string" && token.trim().length > 0;
+    });
+
+    if (tokenDocs.length === 0) return;
+
+    // FCM sendEachForMulticast supports a maximum of 500 tokens per call
+    const chunkSize = 500;
+    for (let i = 0; i < tokenDocs.length; i += chunkSize) {
+      const chunk = tokenDocs.slice(i, i + chunkSize);
+      const tokens = chunk.map((doc) => doc.data().token as string);
+
+      const response = await messaging.sendEachForMulticast({
+        tokens,
+        notification: { title, body },
+        data,
+        android: { notification: { channelId: "order_updates" } },
+        apns: { payload: { aps: { sound: "default" } } },
+      });
+
+      // Remove stale tokens so future sends stay clean
+      const deletePromises: Promise<admin.firestore.WriteResult>[] = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          const code = resp.error?.code ?? "";
+          if (
+            code === "messaging/registration-token-not-registered" ||
+            code === "messaging/invalid-registration-token"
+          ) {
+            deletePromises.push(chunk[idx].ref.delete());
+          }
+        }
+      });
+      if (deletePromises.length > 0) await Promise.allSettled(deletePromises);
+
+      logger.info("sendFcmToUser: FCM push dispatched", {
+        userId,
+        tokenCount: tokens.length,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+      });
+    }
+  } catch (error) {
+    logger.warn("sendFcmToUser: FCM dispatch failed (non-critical)", {
+      userId,
+      error: (error as any)?.message,
+    });
+  }
+}
+
+/**
+ * @helper sendFcmToAdmins
+ * @purpose Queries all admin/owner users, collects their FCM tokens, and dispatches a push.
+ *   Deduplicates tokens across multiple admins and devices.
+ *   Automatically deletes expired or invalid tokens from Firestore.
+ *   Never throws — all errors are logged as warnings.
+ * @param title   Notification title shown in the system tray.
+ * @param body    Notification body shown in the system tray.
+ * @param data    Key-value data payload forwarded to the Flutter app.
+ */
+async function sendFcmToAdmins(
+  title: string,
+  body: string,
+  data: Record<string, string>
+): Promise<void> {
+  try {
+    const adminsSnapshot = await db
+      .collection("users")
+      .where("role", "in", ["admin", "owner"])
+      .get();
+
+    if (adminsSnapshot.empty) return;
+
+    // Fetch FCM token subcollections for all admins in parallel
+    const tokenFetches = adminsSnapshot.docs.map((adminDoc) =>
+      db
+        .collection("users")
+        .doc(adminDoc.id)
+        .collection("fcmTokens")
+        .where("enabled", "==", true)
+        .get()
+    );
+
+    const tokenResults = await Promise.allSettled(tokenFetches);
+
+    const allTokenDocs: admin.firestore.QueryDocumentSnapshot[] = [];
+    const seenTokens = new Set<string>();
+
+    for (const result of tokenResults) {
+      if (result.status !== "fulfilled") continue;
+      for (const doc of result.value.docs) {
+        const token = doc.data()?.token;
+        if (typeof token !== "string" || !token.trim() || seenTokens.has(token)) continue;
+        seenTokens.add(token);
+        allTokenDocs.push(doc);
+      }
+    }
+
+    if (allTokenDocs.length === 0) return;
+
+    // FCM sendEachForMulticast supports a maximum of 500 tokens per call
+    const chunkSize = 500;
+    for (let i = 0; i < allTokenDocs.length; i += chunkSize) {
+      const chunk = allTokenDocs.slice(i, i + chunkSize);
+      const tokens = chunk.map((doc) => doc.data().token as string);
+
+      const response = await messaging.sendEachForMulticast({
+        tokens,
+        notification: { title, body },
+        data,
+        android: { notification: { channelId: "order_updates" } },
+        apns: { payload: { aps: { sound: "default" } } },
+      });
+
+      // Remove stale tokens so future sends stay clean
+      const deletePromises: Promise<admin.firestore.WriteResult>[] = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          const code = resp.error?.code ?? "";
+          if (
+            code === "messaging/registration-token-not-registered" ||
+            code === "messaging/invalid-registration-token"
+          ) {
+            deletePromises.push(chunk[idx].ref.delete());
+          }
+        }
+      });
+      if (deletePromises.length > 0) await Promise.allSettled(deletePromises);
+
+      logger.info("sendFcmToAdmins: FCM push dispatched", {
+        adminCount: adminsSnapshot.size,
+        tokenCount: tokens.length,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+      });
+    }
+  } catch (error) {
+    logger.warn("sendFcmToAdmins: FCM dispatch failed (non-critical)", {
+      error: (error as any)?.message,
+    });
+  }
+}
+
 function generateOrderSearchTokens(values: string[]): string[] {
   const tokens = new Set<string>();
   const maxTokens = 120;
@@ -1070,7 +1145,6 @@ function generateOrderSearchTokens(values: string[]): string[] {
     }
   }
 
-  // BUSINESS RULE: Allow matching items via suffix checks (e.g. searching "0912" matches order id "GK00000912").
   function addSuffixes(value: string) {
     const maxLength = value.length > 20 ? 20 : value.length;
     for (let length = 2; length <= maxLength; length++) {
@@ -1102,3 +1176,245 @@ function generateOrderSearchTokens(values: string[]): string[] {
 
   return Array.from(tokens).slice(0, maxTokens);
 }
+
+
+
+import { defineSecret } from "firebase-functions/params";
+
+const msg91AuthKey = defineSecret("MSG91_AUTH_KEY");
+const MSG91_TEMPLATE_ID = "YOUR_MSG91_TEMPLATE_ID"; // To be replaced in Firebase config
+
+export const sendOtp = onCall(
+  { secrets: [msg91AuthKey] },
+  async (request) => {
+    const { phoneNumber } = request.data;
+    if (!phoneNumber || typeof phoneNumber !== "string" || !/^\+91[0-9]{10}$/.test(phoneNumber)) {
+      throw new HttpsError("invalid-argument", "Invalid Indian phone number format. Must be +91 followed by 10 digits.");
+    }
+
+    const normalizedPhone = phoneNumber.replace("+91", "91");
+    const ip = request.rawRequest.ip || "unknown";
+
+    const now = admin.firestore.Timestamp.now();
+    const rateLimitRef = db.collection("otp_rate_limits").doc(normalizedPhone);
+    const ipLimitRef = db.collection("otp_rate_limits").doc(`ip_${ip.replace(/\./g, '_')}`);
+
+    await db.runTransaction(async (transaction) => {
+      const rlDoc = await transaction.get(rateLimitRef);
+      const ipDoc = await transaction.get(ipLimitRef);
+
+      const hourAgo = new Date(now.toDate().getTime() - 60 * 60 * 1000);
+
+      // Check IP limits
+      let ipRequests = ipDoc.exists ? (ipDoc.data()?.requests || []) : [];
+      ipRequests = ipRequests.filter((ts: any) => ts.toDate() > hourAgo);
+      if (ipRequests.length >= 10) {
+        throw new HttpsError("resource-exhausted", "Too many requests from this IP. Please try again later.");
+      }
+
+      let phoneRequests = rlDoc.exists ? (rlDoc.data()?.requests || []) : [];
+      phoneRequests = phoneRequests.filter((ts: any) => ts.toDate() > hourAgo);
+      
+      const blockedUntil = rlDoc.exists ? rlDoc.data()?.blockedUntil : null;
+      if (blockedUntil && blockedUntil.toDate() > now.toDate()) {
+        throw new HttpsError("resource-exhausted", "Too many failed attempts. Try again later.");
+      }
+
+      if (phoneRequests.length >= 5) {
+        throw new HttpsError("resource-exhausted", "Too many requests for this phone number. Try again later.");
+      }
+
+      if (phoneRequests.length > 0) {
+        const lastReq = phoneRequests[phoneRequests.length - 1].toDate();
+        if (now.toDate().getTime() - lastReq.getTime() < 60000) {
+          throw new HttpsError("resource-exhausted", "Please wait 60 seconds before requesting a new OTP.");
+        }
+      }
+
+      ipRequests.push(now);
+      phoneRequests.push(now);
+
+      transaction.set(rateLimitRef, { requests: phoneRequests, failedAttempts: 0, blockedUntil: null }, { merge: true });
+      transaction.set(ipLimitRef, { requests: ipRequests }, { merge: true });
+    });
+
+    try {
+      const authKey = msg91AuthKey.value();
+      const url = `https://control.msg91.com/api/v5/otp?template_id=${MSG91_TEMPLATE_ID}&mobile=${normalizedPhone}&authkey=${authKey}`;
+      
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const data = await res.json();
+
+      if (data.type === "error") {
+        logger.error("MSG91 sendOtp error", { phone: normalizedPhone, msg91Response: data });
+        throw new HttpsError("internal", "Failed to send OTP.");
+      }
+      
+      logger.info("MSG91 sendOtp success", { phone: normalizedPhone });
+      return { success: true };
+    } catch (e: any) {
+      logger.error("sendOtp exception", { error: e.message });
+      throw new HttpsError("internal", "Failed to send OTP.");
+    }
+  }
+);
+
+export const verifyOtp = onCall(
+  { secrets: [msg91AuthKey] },
+  async (request) => {
+    const { phoneNumber, otp } = request.data;
+    if (!phoneNumber || typeof phoneNumber !== "string" || !/^\+91[0-9]{10}$/.test(phoneNumber)) {
+      throw new HttpsError("invalid-argument", "Invalid phone number format.");
+    }
+    if (!otp || typeof otp !== "string" || otp.length < 4) {
+      throw new HttpsError("invalid-argument", "Invalid OTP format.");
+    }
+
+    const normalizedPhone = phoneNumber.replace("+91", "91");
+    const rateLimitRef = db.collection("otp_rate_limits").doc(normalizedPhone);
+    const now = admin.firestore.Timestamp.now();
+
+    await db.runTransaction(async (transaction) => {
+      const rlDoc = await transaction.get(rateLimitRef);
+      if (!rlDoc.exists) return; // Allow verify even if no limit doc, though rare
+
+      const blockedUntil = rlDoc.data()?.blockedUntil;
+      if (blockedUntil && blockedUntil.toDate() > now.toDate()) {
+        throw new HttpsError("resource-exhausted", "Too many failed attempts. Try again later.");
+      }
+    });
+
+    try {
+      const authKey = msg91AuthKey.value();
+      const url = `https://control.msg91.com/api/v5/otp/verify?otp=${otp}&mobile=${normalizedPhone}`;
+      
+      const res = await fetch(url, { method: 'GET', headers: { 'authkey': authKey } });
+      const data = await res.json();
+
+      if (data.type === "error") {
+        await db.runTransaction(async (transaction) => {
+          const rlDoc = await transaction.get(rateLimitRef);
+          let failedAttempts = rlDoc.exists ? (rlDoc.data()?.failedAttempts || 0) : 0;
+          failedAttempts++;
+          
+          let blockedUntil = null;
+          if (failedAttempts >= 3) {
+            blockedUntil = admin.firestore.Timestamp.fromDate(new Date(now.toDate().getTime() + 15 * 60 * 1000));
+          }
+          transaction.set(rateLimitRef, { failedAttempts, blockedUntil }, { merge: true });
+        });
+        
+        throw new HttpsError("invalid-argument", "Incorrect OTP or OTP expired.");
+      }
+
+      // OTP Verified Successfully
+      // Clear failed attempts
+      await rateLimitRef.set({ failedAttempts: 0, blockedUntil: null }, { merge: true });
+
+      // Handle Firebase Auth User
+      let uid: string;
+      try {
+        const userRecord = await admin.auth().getUserByPhoneNumber(phoneNumber);
+        uid = userRecord.uid;
+      } catch (error: any) {
+        if (error.code === 'auth/user-not-found') {
+          const newUser = await admin.auth().createUser({ phoneNumber });
+          uid = newUser.uid;
+        } else {
+          throw error;
+        }
+      }
+
+      // Generate custom token
+      const customToken = await admin.auth().createCustomToken(uid);
+      logger.info("MSG91 verifyOtp success", { phone: normalizedPhone, uid });
+      return { token: customToken };
+    } catch (e: any) {
+      logger.error("verifyOtp exception", { error: e.message });
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError("internal", "Verification failed.");
+    }
+  }
+);
+
+export const validateMsg91Session = onCall(
+  { secrets: [msg91AuthKey] },
+  async (request) => {
+    const { accessToken } = request.data;
+    
+    const ip = request.rawRequest.ip || "unknown";
+    const now = admin.firestore.Timestamp.now();
+    const ipLimitRef = db.collection("otp_rate_limits").doc(`validate_ip_${ip.replace(/\./g, '_')}`);
+    await db.runTransaction(async (transaction) => {
+      const ipDoc = await transaction.get(ipLimitRef);
+      const hourAgo = new Date(now.toDate().getTime() - 60 * 60 * 1000);
+
+      let ipRequests = ipDoc.exists ? (ipDoc.data()?.requests || []) : [];
+      ipRequests = ipRequests.filter((ts: any) => ts.toDate() > hourAgo);
+      if (ipRequests.length >= 20) {
+        throw new HttpsError("resource-exhausted", "Too many validation requests from this IP. Please try again later.");
+      }
+      
+      ipRequests.push(now);
+      transaction.set(ipLimitRef, { requests: ipRequests }, { merge: true });
+    });
+
+    try {
+      const authKey = msg91AuthKey.value();
+      const url = "https://api.msg91.com/api/v5/widget/verifyAccessToken";
+      
+      const res = await fetch(url, { 
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/json',
+          'authkey': authKey
+        },
+        body: JSON.stringify({ 
+          "access-token": accessToken 
+        })
+      });
+      
+      const data = await res.json();
+      logger.info("MSG91 raw response", { data });
+
+      const verifiedPhoneRaw = data.mobile || data.message;
+      if (data.type === "error" || !verifiedPhoneRaw) {
+        logger.warn("MSG91 token validation failed", { response: data });
+        // Return clear error if token already verified
+        if (data.code === 702 || data.code === 703 || String(data.message).includes("already verified")) {
+           throw new HttpsError("already-exists", "Token already verified by backend.");
+        }
+        throw new HttpsError("permission-denied", "Backend session validation failed.");
+      }
+
+      let verifiedPhone = String(verifiedPhoneRaw);
+      if (!verifiedPhone.startsWith("+")) {
+        verifiedPhone = `+${verifiedPhone}`;
+      }
+
+      let uid: string;
+      try {
+        const userRecord = await admin.auth().getUserByPhoneNumber(verifiedPhone);
+        uid = userRecord.uid;
+      } catch (error: any) {
+        if (error.code === 'auth/user-not-found') {
+          const newUser = await admin.auth().createUser({ phoneNumber: verifiedPhone });
+          uid = newUser.uid;
+        } else {
+          throw error;
+        }
+      }
+
+      const customToken = await admin.auth().createCustomToken(uid);
+      logger.info("MSG91 validate session success", { phone: verifiedPhone, uid });
+      
+      return { token: customToken };
+    } catch (e: any) {
+      logger.error("validateMsg91Session exception", { error: e.message || e, stack: e.stack });
+      if (e.code) {
+        throw new HttpsError(e.code, e.message);
+      }
+      throw new HttpsError("internal", "Token validation failed.");
+    }
+  }
+);

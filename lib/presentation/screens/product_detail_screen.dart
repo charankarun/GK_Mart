@@ -9,7 +9,9 @@ import '../providers/commerce_providers.dart';
 import '../widgets/app_cached_network_image.dart';
 
 import '../providers/catalog_providers.dart';
-
+import '../providers/wishlist_provider.dart';
+import '../../core/errors/app_error_handler.dart';
+import '../navigation/customer_navigation_scope.dart';
 class ProductDetailScreen extends ConsumerWidget {
   const ProductDetailScreen({
     super.key,
@@ -48,8 +50,40 @@ class ProductDetailScreen extends ConsumerWidget {
     final quantity = cartItem?.quantity ?? 0;
     final cartController = ref.read(cartControllerProvider.notifier);
 
+    final wishlistedProductIds = ref.watch(wishlistProductIdSetProvider(session.uid));
+    final wishlistPendingProductIds = ref.watch(wishlistPendingProductIdsProvider(session.uid));
+    
+    final isWishlisted = wishlistedProductIds.contains(realTimeProduct.id);
+    final isWishlistUpdating = wishlistPendingProductIds.contains(realTimeProduct.id);
+
     return Scaffold(
-      appBar: AppBar(title: Text(realTimeProduct.name)),
+      appBar: AppBar(
+        title: Text(realTimeProduct.name),
+        actions: [
+          IconButton(
+            icon: Icon(
+              isWishlisted ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              color: isWishlisted ? AppColors.danger : null,
+            ),
+            onPressed: isWishlistUpdating ? null : () async {
+              try {
+                await ref.read(setProductWishlistedProvider)(
+                  userId: session.uid,
+                  productId: realTimeProduct.id,
+                  wishlisted: !isWishlisted,
+                );
+              } catch (error) {
+                if (!context.mounted) return;
+                AppErrorHandler.showErrorSnackBar(
+                  context,
+                  error,
+                  fallbackMessage: 'Could not update wishlist',
+                );
+              }
+            },
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Container(
@@ -149,23 +183,21 @@ class ProductDetailScreen extends ConsumerWidget {
                 backgroundColor: AppColors.primary,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              onPressed: (!realTimeProduct.isAvailable ||
-                      realTimeProduct.isStockEmpty ||
-                      (realTimeProduct.trackStock &&
-                          quantity >= (realTimeProduct.stockQuantity ?? 0)))
+              onPressed: (!realTimeProduct.isAvailable || realTimeProduct.isStockEmpty)
                   ? null
-                  : () {
-                      cartController.addProduct(realTimeProduct);
-                    },
+                  : quantity > 0
+                      ? () {
+                          CustomerNavigationScope.openCart(context);
+                        }
+                      : () {
+                          cartController.addProduct(realTimeProduct);
+                        },
               child: Text(
                 (!realTimeProduct.isAvailable || realTimeProduct.isStockEmpty)
                     ? 'Out of Stock'
-                    : (realTimeProduct.trackStock &&
-                            quantity >= (realTimeProduct.stockQuantity ?? 0))
-                        ? 'Limit Reached'
-                        : quantity == 0
-                            ? 'Add to Cart'
-                            : 'Add More',
+                    : quantity > 0
+                        ? '🛒 Go to Cart'
+                        : 'Add to Cart',
                 style: const TextStyle(fontSize: 16),
               ),
             ),
