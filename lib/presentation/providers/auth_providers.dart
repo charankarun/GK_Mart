@@ -5,6 +5,15 @@ import '../../domain/entities/auth_session.dart';
 import 'repository_providers.dart';
 import 'role_provider.dart';
 
+import 'package:flutter_riverpod/legacy.dart';
+
+enum OtpMethod {
+  msg91,
+  gt,
+}
+
+final activeOtpMethodProvider = StateProvider.autoDispose<OtpMethod>((ref) => OtpMethod.msg91);
+
 final authStateProvider = StreamProvider<AuthSession?>((ref) {
   return ref.watch(authRepositoryProvider).authStateChanges();
 });

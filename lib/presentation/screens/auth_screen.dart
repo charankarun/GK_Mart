@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/analytics_service.dart';
+import '../providers/auth_providers.dart';
 import '../providers/repository_providers.dart';
 
 class AuthScreen extends ConsumerStatefulWidget {
@@ -30,7 +31,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   bool isLoading = false;
 
   Timer? _timer;
-  int _secondsRemaining = 30;
+  int _secondsRemaining = 60;
 
   static final List<DateTime> _otpSendTimestamps = [];
 
@@ -52,7 +53,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   void _startTimer() {
     _timer?.cancel();
     setState(() {
-      _secondsRemaining = 30;
+      _secondsRemaining = 60;
     });
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
@@ -89,8 +90,13 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 
     setState(() => isLoading = true);
 
+    final currentMethod = ref.read(activeOtpMethodProvider);
+    final phoneRepo = currentMethod == OtpMethod.msg91
+        ? ref.read(msg91PhoneAuthRepositoryProvider)
+        : ref.read(gtPhoneAuthRepositoryProvider);
+
     try {
-      await ref.read(phoneAuthRepositoryProvider).sendOtp(
+      await phoneRepo.sendOtp(
             phoneNumber: _e164Phone,
             onCodeSent: (verId) {
               if (!mounted) return;
@@ -135,8 +141,13 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 
     setState(() => isLoading = true);
 
+    final currentMethod = ref.read(activeOtpMethodProvider);
+    final phoneRepo = currentMethod == OtpMethod.msg91
+        ? ref.read(msg91PhoneAuthRepositoryProvider)
+        : ref.read(gtPhoneAuthRepositoryProvider);
+
     try {
-      await ref.read(phoneAuthRepositoryProvider).verifyOtp(
+      await phoneRepo.verifyOtp(
             verificationId: verificationId,
             smsCode: otp,
             fallbackPhone: _e164Phone,
@@ -158,6 +169,19 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       otpController.clear();
       isLoading = false;
     });
+  }
+
+  void _fallbackToGt() {
+    ref.read(msg91PhoneAuthRepositoryProvider).clearSession();
+    ref.read(activeOtpMethodProvider.notifier).state = OtpMethod.gt;
+    _timer?.cancel();
+    setState(() {
+      otpSent = false;
+      verificationId = '';
+      otpController.clear();
+      isLoading = false;
+    });
+    sendOTP();
   }
 
   String _getFriendlyErrorMessage(Object error) {
@@ -189,27 +213,75 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   }
 
   String _getFriendlyMessageFromString(String message) {
-    final lowerMessage = message.toLowerCase();
-    if (lowerMessage.contains('blocked') ||
-        lowerMessage.contains('unusual activity') ||
-        lowerMessage.contains('too-many-requests') ||
-        lowerMessage.contains('too many requests')) {
-      return 'Too many verification attempts detected. Please try again later.';
+    if (message.startsWith('msg91-error: ')) {
+      final rawError = message.replaceFirst('msg91-error: ', '').toLowerCase();
+      
+      if (rawError.contains('widget not initialized') || rawError.contains('configuration')) {
+        return 'Configuration error. Please contact support.';
+      }
+      if (rawError.contains('authenticationfailure') || rawError.contains('invalid token') || rawError.contains('unauthorized')) {
+        return 'Configuration error. Please contact support.';
+      }
+      if (rawError.contains('invalid') || rawError.contains('identifier')) {
+        return 'Invalid mobile number.';
+      }
+      if (rawError.contains('rate limit') || rawError.contains('too many')) {
+        return 'Please wait and try again.';
+      }
+      if (rawError.contains('network') || rawError.contains('socketexception') || rawError.contains('failed host lookup')) {
+        return 'Please check your internet connection.';
+      }
+      return 'Temporary OTP service error. Try fallback method.';
     }
+    
+    final lowerMessage = message.toLowerCase();
+    
+    // Explicit mappings:
+    if (lowerMessage.contains('already verifed') || 
+        lowerMessage.contains('already verified')) {
+      return 'This OTP has already been verified. Please request a new OTP.';
+    }
+    
+    // Specifically handle backend session validation failure and App Check failure
+    if (lowerMessage.contains('backend session validation failed') ||
+        lowerMessage.contains('server validation failed') ||
+        lowerMessage.contains('permission-denied') ||
+        lowerMessage.contains('unauthenticated') ||
+        lowerMessage.contains('app verification failed')) {
+      return 'Unable to complete verification. Please try again.';
+    }
+
+    if (lowerMessage.contains('session-expired') ||
+        (lowerMessage.contains('expired') && !lowerMessage.contains('backend'))) {
+      return 'OTP expired. Request a new OTP.';
+    }
+    
     if (lowerMessage.contains('invalid-verification-code') ||
         lowerMessage.contains('invalid-credential') ||
         lowerMessage.contains('invalid code') ||
         lowerMessage.contains('incorrect')) {
-      return 'Incorrect OTP entered.';
+      return 'Invalid OTP. Please check and try again.';
+    }
+    
+    // Additional general mappings:
+    if (lowerMessage.contains('blocked') ||
+        lowerMessage.contains('unusual activity') ||
+        lowerMessage.contains('too-many-requests') ||
+        lowerMessage.contains('too many requests') ||
+        lowerMessage.contains('rate limit') ||
+        lowerMessage.contains('resource-exhausted')) {
+      return 'Too many verification attempts detected. Please try again later.';
     }
     if (lowerMessage.contains('network') ||
         lowerMessage.contains('connection') ||
         lowerMessage.contains('network-request-failed')) {
       return 'Please check your internet connection.';
     }
-    if (lowerMessage.contains('session-expired') ||
-        lowerMessage.contains('expired')) {
-      return 'OTP expired. Request a new OTP.';
+    if (lowerMessage.contains('configuration') ||
+        lowerMessage.contains('authenticationfailure') ||
+        lowerMessage.contains('invalid token') ||
+        lowerMessage.contains('unauthorized')) {
+      return 'Configuration error. Please contact support.';
     }
     return 'An error occurred. Please try again.';
   }
@@ -348,6 +420,27 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                               ),
                           ],
                         ),
+                        if (ref.watch(activeOtpMethodProvider) == OtpMethod.msg91) ...[
+                          const SizedBox(height: 8),
+                          Center(
+                            child: TextButton(
+                              onPressed: isLoading ? null : _fallbackToGt,
+                              style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: const Text(
+                                'Having trouble receiving the OTP? Try another method',
+                                style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ] else ...[
                         TextField(
                           controller: phoneController,

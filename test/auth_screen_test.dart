@@ -5,21 +5,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supermarket_app/domain/entities/auth_session.dart';
 import 'package:supermarket_app/domain/repositories/phone_auth_repository.dart';
+import 'package:supermarket_app/data/repositories/msg91_phone_auth_repository.dart';
 import 'package:supermarket_app/presentation/providers/repository_providers.dart';
 import 'package:supermarket_app/presentation/screens/auth_screen.dart';
 
 void main() {
-  late _FakePhoneAuthRepository fakeRepository;
+  late _FakeMsg91PhoneAuthRepository fakeMsg91Repository;
+  late _FakePhoneAuthRepository fakeGtRepository;
 
   setUp(() {
-    fakeRepository = _FakePhoneAuthRepository();
+    fakeMsg91Repository = _FakeMsg91PhoneAuthRepository();
+    fakeGtRepository = _FakePhoneAuthRepository();
     AuthScreen.resetRateLimit();
   });
 
   Widget createAuthScreen() {
     return ProviderScope(
       overrides: [
-        phoneAuthRepositoryProvider.overrideWithValue(fakeRepository),
+        msg91PhoneAuthRepositoryProvider.overrideWithValue(fakeMsg91Repository),
+        gtPhoneAuthRepositoryProvider.overrideWithValue(fakeGtRepository),
       ],
       child: const MaterialApp(
         home: AuthScreen(),
@@ -80,7 +84,7 @@ void main() {
       await tester.enterText(find.byType(TextField), '9876543210');
       await tester.tap(find.widgetWithText(ElevatedButton, 'Send Verification OTP'));
       await tester.pump();
-      expect(fakeRepository.sendOtpCalls, 1);
+      expect(fakeMsg91Repository.sendOtpCalls, 1);
 
       // Return to screen via Change Number
       await tester.tap(find.widgetWithText(TextButton, 'Change Number'));
@@ -89,7 +93,7 @@ void main() {
       // Attempt 2
       await tester.tap(find.widgetWithText(ElevatedButton, 'Send Verification OTP'));
       await tester.pump();
-      expect(fakeRepository.sendOtpCalls, 2);
+      expect(fakeMsg91Repository.sendOtpCalls, 2);
 
       // Return to screen via Change Number
       await tester.tap(find.widgetWithText(TextButton, 'Change Number'));
@@ -98,7 +102,7 @@ void main() {
       // Attempt 3
       await tester.tap(find.widgetWithText(ElevatedButton, 'Send Verification OTP'));
       await tester.pump();
-      expect(fakeRepository.sendOtpCalls, 3);
+      expect(fakeMsg91Repository.sendOtpCalls, 3);
 
       // Return to screen via Change Number
       await tester.tap(find.widgetWithText(TextButton, 'Change Number'));
@@ -111,7 +115,7 @@ void main() {
       // Should show the local rate limit warning message
       expect(find.text('Too many OTP requests. Please try again after a few minutes.'), findsOneWidget);
       // Firebase sendOtp should NOT have been called for the 4th time
-      expect(fakeRepository.sendOtpCalls, 3);
+      expect(fakeMsg91Repository.sendOtpCalls, 3);
     });
 
     testWidgets('Friendly error messages are shown for Firebase exceptions', (tester) async {
@@ -123,8 +127,8 @@ void main() {
       await tester.pump();
 
       // Test incorrect OTP
-      fakeRepository.failVerify = true;
-      fakeRepository.failVerifyCode = 'invalid-verification-code';
+      fakeMsg91Repository.failVerify = true;
+      fakeMsg91Repository.failVerifyCode = 'invalid-verification-code';
       
       await tester.enterText(find.byType(TextField), '111111');
       await tester.tap(find.widgetWithText(ElevatedButton, 'Verify & Login'));
@@ -134,19 +138,19 @@ void main() {
       expect(find.text('Incorrect OTP entered.'), findsOneWidget);
       
       // Test OTP expired
-      fakeRepository.failVerifyCode = 'session-expired';
+      fakeMsg91Repository.failVerifyCode = 'session-expired';
       await tester.tap(find.widgetWithText(ElevatedButton, 'Verify & Login'));
       await tester.pump();
       expect(find.text('OTP expired. Request a new OTP.'), findsOneWidget);
 
       // Test network error
-      fakeRepository.failVerifyCode = 'network-request-failed';
+      fakeMsg91Repository.failVerifyCode = 'network-request-failed';
       await tester.tap(find.widgetWithText(ElevatedButton, 'Verify & Login'));
       await tester.pump();
       expect(find.text('Please check your internet connection.'), findsOneWidget);
     });
 
-    testWidgets('Countdown renders and enables Resend OTP button after 30 seconds', (tester) async {
+    testWidgets('Countdown renders and enables Resend OTP button after 60 seconds', (tester) async {
       await tester.pumpWidget(createAuthScreen());
 
       await tester.enterText(find.byType(TextField), '9876543210');
@@ -154,16 +158,16 @@ void main() {
       await tester.pump();
 
       // Check countdown text is shown
-      expect(find.text('Resend OTP in 30 seconds'), findsOneWidget);
+      expect(find.text('Resend OTP in 60 seconds'), findsOneWidget);
       expect(find.widgetWithText(TextButton, 'Resend OTP'), findsNothing);
 
       // Tick the timer by 15 seconds
       await tester.pump(const Duration(seconds: 15));
-      expect(find.text('Resend OTP in 15 seconds'), findsOneWidget);
+      expect(find.text('Resend OTP in 45 seconds'), findsOneWidget);
       expect(find.widgetWithText(TextButton, 'Resend OTP'), findsNothing);
 
-      // Tick the timer past 30 seconds
-      await tester.pump(const Duration(seconds: 16));
+      // Tick the timer past 60 seconds
+      await tester.pump(const Duration(seconds: 46));
 
       // Countdown text should disappear, and Resend OTP button should appear
       expect(find.textContaining('Resend OTP in'), findsNothing);
@@ -232,4 +236,9 @@ class _FakePhoneAuthRepository implements PhoneAuthRepository {
       phoneNumber: fallbackPhone,
     );
   }
+}
+
+class _FakeMsg91PhoneAuthRepository extends _FakePhoneAuthRepository implements Msg91PhoneAuthRepository {
+  @override
+  void clearSession() {}
 }
