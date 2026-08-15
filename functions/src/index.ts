@@ -1,9 +1,11 @@
+import { FieldValue } from 'firebase-admin/firestore';
 import * as functions from "firebase-functions/v2";
 import { logger } from "firebase-functions/v2";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as v1 from "firebase-functions/v1";
 import * as admin from "firebase-admin";
+
 let _appInitialized = false;
 function initAdmin() {
   if (!_appInitialized) {
@@ -211,8 +213,8 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
               const nextQuantity = currentStock - item.quantity;
 
               const updateData: any = {
-                stockQuantity: admin.firestore.FieldValue.increment(-item.quantity),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                stockQuantity: FieldValue.increment(-item.quantity),
+                updatedAt: FieldValue.serverTimestamp(),
               };
               if (nextQuantity <= 0) {
                 updateData.isAvailable = false;
@@ -225,7 +227,7 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         // 5. Update counter
         transaction.set(counterRef, {
           next: nextNumber + 1,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
 
         // 6. Update order status and official ID
@@ -241,7 +243,7 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
           orderId: officialOrderId,
           status: "Placed",
           searchTokens: updatedTokens,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          updatedAt: FieldValue.serverTimestamp()
         });
 
         return officialOrderId;
@@ -279,7 +281,7 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
           customerName: order.userName || order.customerName || "",
           phone: order.phone || "",
           date: dateStr,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
           isRead: false
         });
 
@@ -298,7 +300,7 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
           customerName: order.userName || order.customerName || "",
           phone: order.phone || "",
           date: dateStr,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
           isRead: false
         });
 
@@ -325,7 +327,7 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
       await db.collection("orders").doc(event.params.orderId).update({
         status: "Failed",
         failureReason: error.message || "Unknown error",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        updatedAt: FieldValue.serverTimestamp()
       });
     }
   }
@@ -384,8 +386,8 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
                 const nextQuantity = currentStock + item.quantity;
 
                 const updateData: any = {
-                  stockQuantity: admin.firestore.FieldValue.increment(item.quantity),
-                  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                  stockQuantity: FieldValue.increment(item.quantity),
+                  updatedAt: FieldValue.serverTimestamp(),
                 };
                 if (nextQuantity > 0) {
                   updateData.isAvailable = true;
@@ -399,7 +401,7 @@ export const processOrderCancellation = functions.firestore.onDocumentUpdated(
         // 3. Update order status to Cancelled
         transaction.update(orderRef, {
           status: "Cancelled",
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          updatedAt: FieldValue.serverTimestamp()
         });
       });
 
@@ -450,7 +452,7 @@ export const processOrderStatusUpdate = functions.firestore.onDocumentUpdated(
         customerName: after.userName || after.customerName || "",
         phone: after.phone || "",
         date: new Date().toISOString(),
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
         isRead: false
       });
 
@@ -489,7 +491,7 @@ export const cleanupStuckOrders = onSchedule("every 15 minutes", async (event) =
       batch.update(doc.ref, {
         status: "Failed",
         failureReason: "Transaction Timeout (Order stuck in Pending)",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        updatedAt: FieldValue.serverTimestamp()
       });
       count++;
 
@@ -535,7 +537,7 @@ export const processUserDeletion = v1.auth.user().onDelete(async (user) => {
         email: "Redacted",
         searchTokens: [],
         userDeleted: true,
-        deletedAt: admin.firestore.FieldValue.serverTimestamp()
+        deletedAt: FieldValue.serverTimestamp()
       });
       count++;
 
@@ -604,11 +606,11 @@ export const processProductWrite = functions.firestore.onDocumentWritten(
       return;
     }
 
-    const updates: any = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-    if (totalDelta !== 0) updates.totalProducts = admin.firestore.FieldValue.increment(totalDelta);
-    if (availableDelta !== 0) updates.availableProducts = admin.firestore.FieldValue.increment(availableDelta);
-    if (outOfStockDelta !== 0) updates.outOfStockProducts = admin.firestore.FieldValue.increment(outOfStockDelta);
-    if (lowStockDelta !== 0) updates.lowStockProducts = admin.firestore.FieldValue.increment(lowStockDelta);
+    const updates: any = { updatedAt: FieldValue.serverTimestamp() };
+    if (totalDelta !== 0) updates.totalProducts = FieldValue.increment(totalDelta);
+    if (availableDelta !== 0) updates.availableProducts = FieldValue.increment(availableDelta);
+    if (outOfStockDelta !== 0) updates.outOfStockProducts = FieldValue.increment(outOfStockDelta);
+    if (lowStockDelta !== 0) updates.lowStockProducts = FieldValue.increment(lowStockDelta);
 
     try {
       await db.collection("system_stats").doc("dashboard_stats").set(updates, { merge: true });
@@ -632,8 +634,8 @@ export const processCategoryWrite = functions.firestore.onDocumentWritten(
 
     try {
       await db.collection("system_stats").doc("dashboard_stats").set({
-        totalCategories: admin.firestore.FieldValue.increment(delta),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        totalCategories: FieldValue.increment(delta),
+        updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
     } catch (error) {
       logger.error("processCategoryWrite: failed to update category stats", { functionName: "processCategoryWrite", categoryId: event.params.categoryId, operation: "stats_update", delta, error: (error as any)?.message });
@@ -695,9 +697,9 @@ export const recalibrateInventoryStats = onCall(
         availableProducts,
         outOfStockProducts: outOfStockProductsCalc,
         lowStockProducts,
-        lastRecalibratedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastRecalibratedAt: FieldValue.serverTimestamp(),
         lastRecalibratedBy: request.auth.uid,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
 
       logger.info("recalibrateInventoryStats: completed", { functionName: "recalibrateInventoryStats", uid: request.auth.uid, operation: "inventory_recalibration", totalProducts, availableProducts, outOfStockProducts: outOfStockProductsCalc, lowStockProducts, totalCategories });
@@ -783,11 +785,11 @@ export const processOrderWrite = functions.firestore.onDocumentWritten(
       return;
     }
 
-    const updates: any = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-    if (ordersDelta !== 0) updates.totalOrders = admin.firestore.FieldValue.increment(ordersDelta);
-    if (pendingDelta !== 0) updates.pendingOrders = admin.firestore.FieldValue.increment(pendingDelta);
-    if (deliveredDelta !== 0) updates.deliveredOrders = admin.firestore.FieldValue.increment(deliveredDelta);
-    if (revenueDelta !== 0.0) updates.revenue = admin.firestore.FieldValue.increment(revenueDelta);
+    const updates: any = { updatedAt: FieldValue.serverTimestamp() };
+    if (ordersDelta !== 0) updates.totalOrders = FieldValue.increment(ordersDelta);
+    if (pendingDelta !== 0) updates.pendingOrders = FieldValue.increment(pendingDelta);
+    if (deliveredDelta !== 0) updates.deliveredOrders = FieldValue.increment(deliveredDelta);
+    if (revenueDelta !== 0.0) updates.revenue = FieldValue.increment(revenueDelta);
 
     try {
       await db.collection("system_stats").doc("order_analytics").set(updates, { merge: true });
@@ -875,9 +877,9 @@ export const recalibrateOrderAnalytics = onCall(
         pendingOrders,
         deliveredOrders,
         revenue,
-        lastRecalibratedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastRecalibratedAt: FieldValue.serverTimestamp(),
         lastRecalibratedBy: request.auth.uid,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
 
       logger.info("recalibrateOrderAnalytics: completed", { functionName: "recalibrateOrderAnalytics", uid: request.auth.uid, operation: "order_recalibration", totalOrders, pendingOrders, deliveredOrders, revenue });
@@ -933,13 +935,13 @@ export const processAuthoritativeAnalytics = functions.firestore.onDocumentUpdat
 
         transaction.set(ledgerRef, {
           orderId: orderId,
-          processedAt: admin.firestore.FieldValue.serverTimestamp()
+          processedAt: FieldValue.serverTimestamp()
         });
 
         transaction.set(analyticsRef, {
-          successfulPurchases: admin.firestore.FieldValue.increment(1),
-          successfulRevenue: admin.firestore.FieldValue.increment(revenue),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          successfulPurchases: FieldValue.increment(1),
+          successfulRevenue: FieldValue.increment(revenue),
+          updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
       });
       logger.info("processAuthoritativeAnalytics: purchase counted", { functionName: "processAuthoritativeAnalytics", orderId, eventType: "Pending->Placed", operation: "analytics_increment", revenue });
@@ -1184,6 +1186,52 @@ import { defineSecret } from "firebase-functions/params";
 const msg91AuthKey = defineSecret("MSG91_AUTH_KEY");
 const MSG91_TEMPLATE_ID = "YOUR_MSG91_TEMPLATE_ID"; // To be replaced in Firebase config
 
+// ===========================================================================
+// LOAD-TEST BYPASS HELPERS
+// These are active ONLY when BOTH gates are true simultaneously:
+//   Gate 1: process.env.LOAD_TEST_MODE === "true"  (functions/.env.local, emulator only)
+//   Gate 2: Firestore system_config/load_test.enabled === true  (set by seed-accounts.js)
+// In production, LOAD_TEST_MODE is never set, so isLoadTestMode() short-circuits
+// to false before touching Firestore. The bypass is permanently off in production.
+// ===========================================================================
+
+/** Hardcoded allowlist of exactly the 30 seeded test phone numbers.
+ *  No wildcards, no regex, no prefix matching — exact Set membership only.
+ *  Any real customer number or +919000000031 goes through the normal MSG91 path.
+ */
+const TEST_PHONE_ALLOWLIST = new Set([
+  "+919000000001", "+919000000002", "+919000000003",
+  "+919000000004", "+919000000005", "+919000000006",
+  "+919000000007", "+919000000008", "+919000000009",
+  "+919000000010", "+919000000011", "+919000000012",
+  "+919000000013", "+919000000014", "+919000000015",
+  "+919000000016", "+919000000017", "+919000000018",
+  "+919000000019", "+919000000020", "+919000000021",
+  "+919000000022", "+919000000023", "+919000000024",
+  "+919000000025", "+919000000026", "+919000000027",
+  "+919000000028", "+919000000029", "+919000000030",
+]);
+
+/**
+ * Dual-gate load-test mode check.
+ * Gate 1 (env var) is synchronous and zero-cost — short-circuits immediately in production.
+ * Gate 2 (Firestore) is only reached when Gate 1 passes (emulator with .env.local).
+ * Fails closed: any Firestore read error returns false.
+ */
+async function isLoadTestMode(): Promise<boolean> {
+  // Gate 1: env var must be "true" (never set in production)
+  if (process.env.LOAD_TEST_MODE !== "true") return false;
+
+  // Gate 2: Firestore flag must be explicitly enabled by seed-accounts.js
+  try {
+    const configDoc = await db.collection("system_config").doc("load_test").get();
+    return configDoc.exists && configDoc.data()?.enabled === true;
+  } catch (e) {
+    logger.warn("isLoadTestMode: Firestore check failed — defaulting to false", { error: (e as any)?.message });
+    return false; // fail closed
+  }
+}
+
 export const sendOtp = onCall(
   { secrets: [msg91AuthKey] },
   async (request) => {
@@ -1191,6 +1239,15 @@ export const sendOtp = onCall(
     if (!phoneNumber || typeof phoneNumber !== "string" || !/^\+91[0-9]{10}$/.test(phoneNumber)) {
       throw new HttpsError("invalid-argument", "Invalid Indian phone number format. Must be +91 followed by 10 digits.");
     }
+
+    // ── Load-test bypass (dual-gate) ─────────────────────────────────────────
+    // Both gates must pass: env var AND Firestore flag AND phone in allowlist.
+    // Rate-limit transaction is also skipped to prevent otp_rate_limits pollution.
+    if (TEST_PHONE_ALLOWLIST.has(phoneNumber) && await isLoadTestMode()) {
+      logger.info("sendOtp: load-test bypass activated", { phone: phoneNumber });
+      return { success: true };
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     const normalizedPhone = phoneNumber.replace("+91", "91");
     const ip = request.rawRequest.ip || "unknown";
@@ -1270,6 +1327,28 @@ export const verifyOtp = onCall(
       throw new HttpsError("invalid-argument", "Invalid OTP format.");
     }
 
+    // ── Load-test bypass (dual-gate) ─────────────────────────────────────────
+    // OTP must be "000000", phone must be in the explicit allowlist, and both
+    // gates of isLoadTestMode() must pass. Skips MSG91 verify + rate-limit checks.
+    if (otp === "000000" && TEST_PHONE_ALLOWLIST.has(phoneNumber) && await isLoadTestMode()) {
+      logger.info("verifyOtp: load-test bypass activated", { phone: phoneNumber });
+      let bypassUid: string;
+      try {
+        const userRecord = await admin.auth().getUserByPhoneNumber(phoneNumber);
+        bypassUid = userRecord.uid;
+      } catch (bypassErr: any) {
+        if (bypassErr.code === "auth/user-not-found") {
+          const newUser = await admin.auth().createUser({ phoneNumber });
+          bypassUid = newUser.uid;
+        } else {
+          throw bypassErr;
+        }
+      }
+      const bypassToken = await admin.auth().createCustomToken(bypassUid);
+      return { token: bypassToken };
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const normalizedPhone = phoneNumber.replace("+91", "91");
     const rateLimitRef = db.collection("otp_rate_limits").doc(normalizedPhone);
     const now = admin.firestore.Timestamp.now();
@@ -1342,6 +1421,32 @@ export const validateMsg91Session = onCall(
   async (request) => {
     const { accessToken } = request.data;
     
+    // ── Load-test bypass (dual-gate) ─────────────────────────────────────────
+    // accessToken must equal the sentinel "LOAD_TEST_TOKEN", testPhone must be
+    // in the explicit allowlist, and both gates of isLoadTestMode() must pass.
+    // Skips MSG91 widget verification and the IP rate-limit transaction entirely.
+    if (accessToken === "LOAD_TEST_TOKEN" && await isLoadTestMode()) {
+      const testPhone = typeof request.data.testPhone === "string" ? request.data.testPhone : "";
+      if (TEST_PHONE_ALLOWLIST.has(testPhone)) {
+        logger.info("validateMsg91Session: load-test bypass activated", { testPhone });
+        let bypassUid: string;
+        try {
+          const userRecord = await admin.auth().getUserByPhoneNumber(testPhone);
+          bypassUid = userRecord.uid;
+        } catch (bypassErr: any) {
+          if (bypassErr.code === "auth/user-not-found") {
+            const newUser = await admin.auth().createUser({ phoneNumber: testPhone });
+            bypassUid = newUser.uid;
+          } else {
+            throw bypassErr;
+          }
+        }
+        const bypassToken = await admin.auth().createCustomToken(bypassUid);
+        return { token: bypassToken };
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const ip = request.rawRequest.ip || "unknown";
     const now = admin.firestore.Timestamp.now();
     const ipLimitRef = db.collection("otp_rate_limits").doc(`validate_ip_${ip.replace(/\./g, '_')}`);
@@ -1418,3 +1523,6 @@ export const validateMsg91Session = onCall(
     }
   }
 );
+
+export { testFieldValue } from './testFieldValue';
+
