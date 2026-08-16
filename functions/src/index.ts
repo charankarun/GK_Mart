@@ -343,7 +343,17 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         logger.warn("processPendingOrder: notification dispatch failed (non-critical)", { functionName: "processPendingOrder", orderId: event.params.orderId, officialOrderId: generatedOrderId, operation: "notification_dispatch", error: (error as any)?.message });
       }
     } catch (error: any) {
-      logger.error("processPendingOrder: transaction failed", { functionName: "processPendingOrder", orderId: event.params.orderId, userId: order.userId, operation: "place_order_transaction", status: "Failed", error: error?.message });
+      const productIds = (order.items || []).map((item: any) => item.productId).join(",");
+      logger.error("processPendingOrder: transaction failed", { 
+        functionName: "processPendingOrder", 
+        orderId: event.params.orderId, 
+        userId: order.userId, 
+        operation: "place_order_transaction", 
+        status: "Failed", 
+        error: error?.message,
+        involvedProducts: productIds,
+        rawError: JSON.stringify(error)
+      });
       // Transaction failed
       await db.collection("orders").doc(event.params.orderId).update({
         status: "Failed",
