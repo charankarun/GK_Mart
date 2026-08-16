@@ -29,7 +29,7 @@ const messaging = new Proxy({} as admin.messaging.Messaging, {
 });
 
 export const processPendingOrder = functions.firestore.onDocumentCreated(
-  "orders/{orderId}",
+  { document: "orders/{orderId}", concurrency: 500, maxInstances: 20 },
   async (event) => {
     const orderDoc = event.data;
     if (!orderDoc) return;
@@ -46,9 +46,9 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         // 1. Read products
         const items = order.items || [];
         const productRefs = items.map((item: any) => db.collection("products").doc(item.productId));
-        const productDocs: admin.firestore.DocumentSnapshot[] = [];
-        for (const ref of productRefs) {
-          productDocs.push(await transaction.get(ref) as any);
+        let productDocs: admin.firestore.DocumentSnapshot[] = [];
+        if (productRefs.length > 0) {
+          productDocs = await transaction.getAll(...productRefs) as admin.firestore.DocumentSnapshot[];
         }
 
         // 2. Validate stock and prices
@@ -195,11 +195,31 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
         }
 
 
-        // 3. Read counter and generate official ID
-        const counterRef = db.collection("counters").doc("orders");
-        const counterDoc = await transaction.get(counterRef);
-        const nextNumber = counterDoc.exists ? (counterDoc.data()?.next || 2) : 2;
-        const officialOrderId = `GK${nextNumber.toString().padStart(5, '0')}`;
+        // 3. Generate unique order ID using existence-check-and-retry
+        const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+        let officialOrderId = "";
+        let orderIdRef: admin.firestore.DocumentReference | null = null;
+        let attempts = 0;
+        
+        while (attempts < 5) {
+          let candidate = "GK";
+          for (let k = 0; k < 6; k++) {
+            candidate += chars.charAt(Math.floor(Math.random() * chars.length));
+          }
+          const candidateRef = db.collection("order_ids").doc(candidate);
+          const candidateDoc = await transaction.get(candidateRef);
+          
+          if (!candidateDoc.exists) {
+            officialOrderId = candidate;
+            orderIdRef = candidateRef;
+            break;
+          }
+          attempts++;
+        }
+        
+        if (!officialOrderId || !orderIdRef) {
+          throw new Error("Failed to generate unique order ID after 5 attempts");
+        }
 
         // 4. Update stock
         for (let i = 0; i < items.length; i++) {
@@ -224,11 +244,12 @@ export const processPendingOrder = functions.firestore.onDocumentCreated(
           }
         }
 
-        // 5. Update counter
-        transaction.set(counterRef, {
-          next: nextNumber + 1,
-          updatedAt: FieldValue.serverTimestamp()
-        }, { merge: true });
+        // 5. Reserve order ID
+        transaction.set(orderIdRef, {
+          orderId: event.params.orderId,
+          userId: order.userId,
+          createdAt: FieldValue.serverTimestamp()
+        });
 
         // 6. Update order status and official ID
         const searchValues = [
@@ -1233,7 +1254,7 @@ async function isLoadTestMode(): Promise<boolean> {
 }
 
 export const sendOtp = onCall(
-  { secrets: [msg91AuthKey] },
+  { secrets: [msg91AuthKey], minInstances: 1, maxInstances: 20 },
   async (request) => {
     const { phoneNumber } = request.data;
     if (!phoneNumber || typeof phoneNumber !== "string" || !/^\+91[0-9]{10}$/.test(phoneNumber)) {
@@ -1317,7 +1338,7 @@ export const sendOtp = onCall(
 );
 
 export const verifyOtp = onCall(
-  { secrets: [msg91AuthKey] },
+  { secrets: [msg91AuthKey], minInstances: 1, maxInstances: 20 },
   async (request) => {
     const { phoneNumber, otp } = request.data;
     if (!phoneNumber || typeof phoneNumber !== "string" || !/^\+91[0-9]{10}$/.test(phoneNumber)) {
@@ -1417,7 +1438,7 @@ export const verifyOtp = onCall(
 );
 
 export const validateMsg91Session = onCall(
-  { secrets: [msg91AuthKey] },
+  { secrets: [msg91AuthKey], minInstances: 1, maxInstances: 20 },
   async (request) => {
     const { accessToken } = request.data;
     
@@ -1523,6 +1544,3 @@ export const validateMsg91Session = onCall(
     }
   }
 );
-
-export { testFieldValue } from './testFieldValue';
-
