@@ -12,6 +12,7 @@ class AppColors {
   static const text = Color(0xFF111827);
   static const mutedText = Color(0xFF6B7280);
   static const border = Color(0xFFE5E7EB);
+  static const imageBackground = Color(0xFFF9FAFB);
   static const softGreen = Color(0xFFE8F5E9);
   static const softOrange = Color(0xFFFFF3E0);
   static const success = Color(0xFF0C8346);

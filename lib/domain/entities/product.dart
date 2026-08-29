@@ -14,6 +14,7 @@ class Product {
     this.trackStock = false,
     this.lowStockThreshold = 5,
     this.quantityValue,
+    this.description,
     this.createdAt,
     this.updatedAt,
   });
@@ -32,6 +33,7 @@ class Product {
   final bool trackStock;
   final int lowStockThreshold;
   final double? quantityValue;
+  final String? description;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -96,6 +98,8 @@ class Product {
     int? lowStockThreshold,
     double? quantityValue,
     bool clearQuantityValue = false,
+    String? description,
+    bool clearDescription = false,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -117,6 +121,7 @@ class Product {
       lowStockThreshold: lowStockThreshold ?? this.lowStockThreshold,
       quantityValue:
           clearQuantityValue ? null : quantityValue ?? this.quantityValue,
+      description: clearDescription ? null : description ?? this.description,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

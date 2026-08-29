@@ -270,6 +270,8 @@ service cloud.firestore {
         && data.get('barcode', '').size() <= 64
         && data.get('brand', '') is string
         && data.get('brand', '').size() <= 80
+        && data.get('description', '') is string
+        && data.get('description', '').size() <= 1000
         && data.get('stockQuantity', 0) is number
         && data.get('stockQuantity', 0) >= 0
         && data.get('lowStockThreshold', 5) is number
@@ -293,6 +295,7 @@ service cloud.firestore {
           'unit',
           'barcode',
           'brand',
+          'description',
           'stockQuantity',
           'lowStockThreshold',
           'quantityValue',
@@ -331,6 +334,7 @@ service cloud.firestore {
           'unit',
           'barcode',
           'brand',
+          'description',
           'stockQuantity',
           'lowStockThreshold',
           'quantityValue',

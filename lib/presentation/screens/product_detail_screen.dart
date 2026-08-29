@@ -89,10 +89,10 @@ class ProductDetailScreen extends ConsumerWidget {
           Container(
             height: 250,
             width: double.infinity,
-            color: AppColors.softGreen,
+            color: AppColors.imageBackground,
             child: AppCachedNetworkImage(
               imageUrl: realTimeProduct.imageUrl,
-              fit: BoxFit.cover,
+              fit: BoxFit.contain,
               memCacheWidth: ProductDetailConfig.imageCacheWidth,
               maxWidthDiskCache: ProductDetailConfig.imageDiskCacheWidth,
               placeholder: const _ProductDetailImagePlaceholder(
@@ -142,10 +142,49 @@ class ProductDetailScreen extends ConsumerWidget {
                     ),
                   ],
                   const SizedBox(height: 16),
-                  const Text(
-                    'Fresh and high quality product. Delivered fast to your home.',
-                    style: TextStyle(fontSize: 14),
+                  if (realTimeProduct.brand.trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Text('Brand: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        Text(realTimeProduct.brand.trim(), style: const TextStyle(fontSize: 14)),
+                      ],
+                    ),
+                  ],
+                  if (realTimeProduct.unit.trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Text('Unit: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        Text(realTimeProduct.unit.trim(), style: const TextStyle(fontSize: 14)),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Text('Stock: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      Text(
+                        realTimeProduct.isAvailable 
+                            ? (realTimeProduct.trackStock && realTimeProduct.stockQuantity != null
+                                ? '${realTimeProduct.stockQuantity} In Stock'
+                                : 'In Stock')
+                            : 'Out of Stock',
+                        style: TextStyle(
+                          color: realTimeProduct.isAvailable ? AppColors.primary : Colors.red,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
                   ),
+                  if (realTimeProduct.description != null && realTimeProduct.description!.trim().isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      realTimeProduct.description!,
+                      style: const TextStyle(fontSize: 14, color: Colors.black87),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                   if (quantity > 0)
                     Row(
@@ -221,7 +260,7 @@ class _ProductDetailImagePlaceholder extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: const BoxDecoration(
-        color: AppColors.softGreen,
+        color: AppColors.imageBackground,
       ),
       child: Center(
         child: Column(

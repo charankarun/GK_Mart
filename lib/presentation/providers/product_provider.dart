@@ -150,6 +150,9 @@ class AdminProductListController
         trackStock: input.trackStock,
         lowStockThreshold: input.lowStockThreshold,
         quantityValue: input.quantityValue,
+        description: input.description,
+        createdAt: now,
+        updatedAt: now,
       );
 
       final repository = _ref.read(productRepositoryProvider);
@@ -320,7 +323,7 @@ class AdminProductListController
             bytes: imageBytes,
             fileName:
                 input.imageFileName ?? ProductProviderConfig.imageFileName,
-            contentType: input.imageContentType,
+            contentType: input.imageContentType ?? ProductProviderConfig.defaultImageContentType,
           ),
         );
   }
@@ -424,7 +427,8 @@ class AdminProductInput {
     this.productId,
     this.imageBytes,
     this.imageFileName,
-    this.imageContentType = ProductProviderConfig.defaultImageContentType,
+    this.imageContentType,
+    this.description,
   });
 
   final String? productId;
@@ -443,7 +447,8 @@ class AdminProductInput {
   final double? quantityValue;
   final Uint8List? imageBytes;
   final String? imageFileName;
-  final String imageContentType;
+  final String? imageContentType;
+  final String? description;
 
   bool get isEditing => productId != null && productId!.trim().isNotEmpty;
 }

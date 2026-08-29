@@ -1601,6 +1601,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
   late final TextEditingController _discountPriceController;
   late final TextEditingController _stockQuantityController;
   late final TextEditingController _lowStockThresholdController;
+  late final TextEditingController _descriptionController;
   late bool _isAvailable;
   late bool _trackStock;
   String? _selectedCategoryId;
@@ -1620,6 +1621,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     final product = widget.product;
 
     _nameController = TextEditingController(text: product?.name ?? '');
+    _descriptionController = TextEditingController(text: product?.description ?? '');
     _quantityValueController = TextEditingController(
       text: product?.quantityValue == null
           ? ''
@@ -1665,6 +1667,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     _discountPriceController.dispose();
     _stockQuantityController.dispose();
     _lowStockThresholdController.dispose();
+    _descriptionController.dispose();
     super.dispose();
   }
 
@@ -1693,6 +1696,13 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
                     controller: _nameController,
                     label: ProductManagementText.nameLabel,
                     validator: _requiredText,
+                  ),
+                  const SizedBox(height: 12),
+                  _TextFormInput(
+                    controller: _descriptionController,
+                    label: 'Description (Optional)',
+                    keyboardType: TextInputType.multiline,
+                    maxLines: 3,
                   ),
                   const SizedBox(height: 12),
                   _buildCategoryDropdown(categoriesAsync),
@@ -2083,6 +2093,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
               ProductManagementConfig.lowStockThreshold
           : ProductManagementConfig.lowStockThreshold,
       quantityValue: double.tryParse(_quantityValueController.text.trim()),
+      description: _descriptionController.text.trim(),
       imageBytes: _imageBytes,
       imageFileName: _imageFileName,
       imageContentType: _imageContentType,
@@ -2181,6 +2192,7 @@ class _TextFormInput extends StatelessWidget {
     this.keyboardType,
     this.helperText,
     this.validator,
+    this.maxLines = 1,
   });
 
   final TextEditingController controller;
@@ -2188,6 +2200,7 @@ class _TextFormInput extends StatelessWidget {
   final TextInputType? keyboardType;
   final String? helperText;
   final FormFieldValidator<String>? validator;
+  final int? maxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -2195,6 +2208,7 @@ class _TextFormInput extends StatelessWidget {
       controller: controller,
       keyboardType: keyboardType,
       validator: validator,
+      maxLines: maxLines,
       decoration: InputDecoration(
         labelText: label,
         helperText: helperText,

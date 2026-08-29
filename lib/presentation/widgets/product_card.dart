@@ -166,7 +166,7 @@ class _ProductImage extends StatelessWidget {
       child: Container(
         width: double.infinity,
         decoration: const BoxDecoration(
-          color: Color(0xFFF9FAFB),
+          color: AppColors.imageBackground,
           borderRadius: BorderRadius.vertical(
             top: Radius.circular(AppRadii.lg),
           ),
