@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "slv-super-market"
+    "default": "slv-super-market",
+    "staging": "slv-super-market-staging"
   }
 }
