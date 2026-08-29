@@ -19,6 +19,7 @@ class ProductModel extends Product {
     super.trackStock,
     super.lowStockThreshold,
     super.quantityValue,
+    super.description,
     super.createdAt,
     super.updatedAt,
   });
