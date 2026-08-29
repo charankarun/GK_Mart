@@ -151,8 +151,8 @@ class AdminProductListController
         lowStockThreshold: input.lowStockThreshold,
         quantityValue: input.quantityValue,
         description: input.description,
-        createdAt: now,
-        updatedAt: now,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
       );
 
       final repository = _ref.read(productRepositoryProvider);
